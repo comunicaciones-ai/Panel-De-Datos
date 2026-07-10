@@ -60,8 +60,17 @@ Dos niveles de jerarquía metálica:
   permanecen planos.
 
 ### 4.4 Tarjetas glass (`.tarjeta-glass`)
-`bg-white/75 + backdrop-blur + borde blanco/60 + sombra azulada suave`. Contenedor
+`bg-white/75 + backdrop-blur + borde y sombra vía variables de tema`. Contenedor
 estándar de KPIs, gráficos y selectores sobre los fondos animados.
+
+### 4.5 Tema por programa (2026-07-10)
+El contenedor `#panel` define variables CSS (`--acento`, `--glass-borde`,
+`--glass-sombra`) que el chrome consume: números KPI (`.kpi-valor`), bordes y
+sombras de las tarjetas glass. Al seleccionar **Mujeres ROFÉ** se aplica la clase
+`tema-mr` y la paleta del chrome pasa a la gama del programa (naranja `#D1793F` y
+derivados cálidos en alfas); JC mantiene el azul `#406C9E`. Transiciones de 0.3s.
+Los colores SEMÁNTICOS de los gráficos (verde=aprobó, amarillo=en curso,
+rojo=retirado…) NO cambian con el tema — el significado del color es invariante.
 
 ## 5. Reglas de oro
 1. Paleta oficial intacta — los derivados oscuros son solo para fondos.
@@ -71,6 +80,7 @@ estándar de KPIs, gráficos y selectores sobre los fondos animados.
 5. `prefers-reduced-motion` no es opcional.
 
 ---
-**Versión:** 1.0 · 2026-07-10 · Panel de Datos ROFÉ
-**Cambios:** creación — hero de partículas, trazos de fondo, botón metal líquido,
+**Versión:** 1.1 · 2026-07-10 · Panel de Datos ROFÉ
+**Cambios:** 1.0 creación — hero de partículas, trazos de fondo, botón metal líquido,
 tarjetas glass, sistema de movimiento y derivados de fondo del azul de marca.
+1.1 — tema por programa (chrome naranja al seleccionar Mujeres ROFÉ).

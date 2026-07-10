@@ -57,7 +57,7 @@ function Kpi({ titulo, valor, detalle }: { titulo: string; valor: string; detall
       className="tarjeta-glass p-4"
     >
       <p className="text-xs uppercase tracking-wide text-slate-500">{titulo}</p>
-      <p className="text-3xl font-bold text-rofe-azul mt-1">{valor}</p>
+      <p className="text-3xl font-bold kpi-valor mt-1">{valor}</p>
       {detalle && <p className="text-xs text-slate-400 mt-1">{detalle}</p>}
     </motion.div>
   );
@@ -220,7 +220,11 @@ export default function Pagina() {
     <>
       <Hero />
       <BackgroundPaths />
-      <div id="panel" className="max-w-6xl mx-auto px-4 py-8 scroll-mt-20">
+      {/* tema-mr activa la paleta naranja de Mujeres ROFÉ en todo el panel */}
+      <div
+        id="panel"
+        className={`max-w-6xl mx-auto px-4 py-8 scroll-mt-20 ${programa === 'mr' ? 'tema-mr' : ''}`}
+      >
       {/* Selector de programa */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex gap-1 tarjeta-glass p-1">

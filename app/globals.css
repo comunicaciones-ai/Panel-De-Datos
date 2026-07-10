@@ -6,6 +6,27 @@ body {
   @apply bg-slate-50 text-slate-800 antialiased;
 }
 
+/* ── Tema por programa ───────────────────────────────────────────────────────
+   El panel cambia de paleta según el programa activo (BRAND-DIGITAL: azul
+   #406C9E = Jóvenes creaTIvos · naranja #D1793F = Mujeres ROFÉ). Variables en
+   el contenedor #panel; .tema-mr las cambia a la gama cálida de la sección. */
+#panel {
+  --acento: #406c9e;                      /* números KPI */
+  --glass-borde: rgba(255, 255, 255, 0.6);
+  --glass-sombra: rgba(43, 74, 111, 0.08);
+  --glass-sombra-hover: rgba(43, 74, 111, 0.14);
+}
+#panel.tema-mr {
+  --acento: #d1793f;
+  --glass-borde: rgba(209, 121, 63, 0.35);
+  --glass-sombra: rgba(168, 90, 42, 0.12);
+  --glass-sombra-hover: rgba(168, 90, 42, 0.2);
+}
+.kpi-valor {
+  color: var(--acento, #406c9e);
+  transition: color 0.3s ease;
+}
+
 /* ── Botón metal líquido (borde metálico animado + brillo) ─────────────────── */
 .liquid-metal {
   background:
@@ -104,12 +125,17 @@ body {
   animation-delay: -2.3s;
 }
 
-/* ── Tarjetas glass ─────────────────────────────────────────────────────────── */
+/* ── Tarjetas glass (borde y sombra siguen el tema del programa) ────────────── */
 .tarjeta-glass {
-  @apply rounded-2xl border border-white/60 bg-white/75 shadow-[0_8px_30px_rgba(43,74,111,0.08)] backdrop-blur-md transition-shadow duration-300;
+  @apply rounded-2xl bg-white/75 backdrop-blur-md duration-300;
+  border: 1px solid var(--glass-borde, rgba(255, 255, 255, 0.6));
+  box-shadow: 0 8px 30px var(--glass-sombra, rgba(43, 74, 111, 0.08));
+  transition:
+    box-shadow 0.3s ease,
+    border-color 0.3s ease;
 }
 .tarjeta-glass:hover {
-  box-shadow: 0 12px 38px rgba(43, 74, 111, 0.14);
+  box-shadow: 0 12px 38px var(--glass-sombra-hover, rgba(43, 74, 111, 0.14));
 }
 
 @media (prefers-reduced-motion: reduce) {
