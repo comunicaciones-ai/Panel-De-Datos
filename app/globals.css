@@ -5,3 +5,69 @@
 body {
   @apply bg-slate-50 text-slate-800 antialiased;
 }
+
+/* ── Botón metal líquido (borde metálico animado + brillo) ─────────────────── */
+.liquid-metal {
+  background:
+    linear-gradient(#2b4a6f, #2b4a6f) padding-box,
+    conic-gradient(
+        from var(--metal-ang, 0deg),
+        #406c9e,
+        #83b6dd,
+        #eec935,
+        #83b6dd,
+        #406c9e
+      )
+      border-box;
+  border: 2px solid transparent;
+  box-shadow:
+    0 4px 18px rgba(64, 108, 158, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  animation: metal-girar 4s linear infinite;
+}
+@property --metal-ang {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+@keyframes metal-girar {
+  to {
+    --metal-ang: 360deg;
+  }
+}
+.liquid-metal-shine {
+  left: -40%;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.35) 50%,
+    transparent 80%
+  );
+  transform: skewX(-18deg);
+  animation: metal-brillo 3.2s ease-in-out infinite;
+}
+@keyframes metal-brillo {
+  0%,
+  55% {
+    left: -40%;
+  }
+  85%,
+  100% {
+    left: 110%;
+  }
+}
+
+/* ── Tarjetas glass ─────────────────────────────────────────────────────────── */
+.tarjeta-glass {
+  @apply rounded-2xl border border-white/60 bg-white/75 shadow-[0_8px_30px_rgba(43,74,111,0.08)] backdrop-blur-md transition-shadow duration-300;
+}
+.tarjeta-glass:hover {
+  box-shadow: 0 12px 38px rgba(43, 74, 111, 0.14);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .liquid-metal,
+  .liquid-metal-shine {
+    animation: none;
+  }
+}

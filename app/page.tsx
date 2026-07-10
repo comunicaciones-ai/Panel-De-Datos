@@ -16,6 +16,9 @@ import {
   GraficoEmprendimiento,
   GraficoHistorial,
 } from '@/components/graficos';
+import { motion } from 'framer-motion';
+import { Hero } from '@/components/efectos/Hero';
+import { BackgroundPaths } from '@/components/efectos/BackgroundPaths';
 
 type Programa = 'jc' | 'mr';
 type Tab = 'Resumen' | 'Cursos' | 'Historial' | 'Emprendimiento' | 'Demografía';
@@ -41,21 +44,33 @@ const COLOR_SITUACION: Record<string, string> = {
 
 function Kpi({ titulo, valor, detalle }: { titulo: string; valor: string; detalle?: string }) {
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4">
+    <motion.div
+      initial={{ opacity: 0, y: 14 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-40px' }}
+      transition={{ duration: 0.5 }}
+      className="tarjeta-glass p-4"
+    >
       <p className="text-xs uppercase tracking-wide text-slate-500">{titulo}</p>
       <p className="text-3xl font-bold text-rofe-azul mt-1">{valor}</p>
       {detalle && <p className="text-xs text-slate-400 mt-1">{detalle}</p>}
-    </div>
+    </motion.div>
   );
 }
 
 function Seccion({ titulo, nota, children }: { titulo: string; nota?: string; children: React.ReactNode }) {
   return (
-    <section className="bg-white rounded-xl border border-slate-200 p-4 mb-6">
+    <motion.section
+      initial={{ opacity: 0, y: 22 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: '-60px' }}
+      transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
+      className="tarjeta-glass p-5 mb-6"
+    >
       <h2 className="font-bold text-slate-700 mb-1">{titulo}</h2>
       {nota && <p className="text-xs text-slate-400 mb-3">{nota}</p>}
       {children}
-    </section>
+    </motion.section>
   );
 }
 
@@ -125,23 +140,31 @@ export default function Pagina() {
 
   if (error)
     return (
-      <div className="bg-rofe-rojo/10 border border-rofe-rojo text-rofe-rojo rounded-xl p-6">
-        <p className="font-bold">No se pudieron cargar los datos.</p>
-        <p className="text-sm mt-1">{error}</p>
-        <p className="text-sm mt-2">Intenta recargar la página en unos minutos.</p>
-      </div>
+      <>
+        <Hero />
+        <div className="max-w-6xl mx-auto px-4 py-8">
+          <div className="bg-rofe-rojo/10 border border-rofe-rojo text-rofe-rojo rounded-xl p-6">
+            <p className="font-bold">No se pudieron cargar los datos.</p>
+            <p className="text-sm mt-1">{error}</p>
+            <p className="text-sm mt-2">Intenta recargar la página en unos minutos.</p>
+          </div>
+        </div>
+      </>
     );
 
   if (!datos || !kpis)
     return (
-      <div className="animate-pulse space-y-4">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-24 bg-slate-200 rounded-xl" />
-          ))}
+      <>
+        <Hero />
+        <div className="max-w-6xl mx-auto px-4 py-8 animate-pulse space-y-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="h-24 bg-slate-200 rounded-xl" />
+            ))}
+          </div>
+          <div className="h-72 bg-slate-200 rounded-xl" />
         </div>
-        <div className="h-72 bg-slate-200 rounded-xl" />
-      </div>
+      </>
     );
 
   const emprendimientoOrdenado = ORDEN_SITUACION.map((s) => ({
@@ -159,10 +182,13 @@ export default function Pagina() {
   });
 
   return (
-    <div>
+    <>
+      <Hero />
+      <BackgroundPaths />
+      <div id="panel" className="max-w-6xl mx-auto px-4 py-8 scroll-mt-20">
       {/* Selector de programa */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1">
+        <div className="flex gap-1 tarjeta-glass p-1">
           {(['jc', 'mr'] as Programa[]).map((p) => (
             <button
               key={p}
@@ -180,7 +206,7 @@ export default function Pagina() {
           ))}
         </div>
         {/* Selector de cohorte (actual + históricas de Q10) */}
-        <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1">
+        <div className="flex gap-1 tarjeta-glass p-1">
           {cohortes.map((coh) => (
             <button
               key={coh}
@@ -196,7 +222,7 @@ export default function Pagina() {
           ))}
         </div>
         {/* Tabs del programa/cohorte activos */}
-        <nav className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1 flex-wrap">
+        <nav className="flex gap-1 tarjeta-glass p-1 flex-wrap">
           {tabsDisponibles(programa, cohorte).map((t) => (
             <button
               key={t}
@@ -350,6 +376,7 @@ export default function Pagina() {
           </Seccion>
         </>
       )}
-    </div>
+      </div>
+    </>
   );
 }
