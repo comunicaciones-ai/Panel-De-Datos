@@ -18,6 +18,7 @@ async function leer<T>(recurso: string): Promise<T[]> {
 
 export interface CohorteStats {
   cohorte: string;
+  programa: 'jc' | 'mr' | 'stand';
   total_participantes: number;
   con_emprendimiento: number;
   sin_emprendimiento: number;

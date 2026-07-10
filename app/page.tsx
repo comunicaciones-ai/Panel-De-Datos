@@ -114,7 +114,8 @@ export default function Pagina() {
     const ps = datos.programas.find(
       (p) => p.programa === programa && p.cohorte === cohorte,
     );
-    const co = datos.cohorte.find((c) => c.cohorte === cohorte);
+    // cohorte_stats viene separada por programa desde la migración de separación JC/MR
+    const co = datos.cohorte.find((c) => c.cohorte === cohorte && c.programa === programa);
     return {
       participantes: ps?.participantes ?? 0,
       matriculas: ps?.matriculas ?? 0,
@@ -269,7 +270,7 @@ export default function Pagina() {
               detalle={`${kpis.pctCompletadas}% completadas (>80% avance)`}
             />
             <Kpi titulo="Avance promedio" valor={kpis.promedio} detalle="Sobre todas las matrículas" />
-            {programa === 'jc' && cohorte === COHORTE_ACTUAL ? (
+            {cohorte === COHORTE_ACTUAL && kpis.edadProm !== '—' ? (
               <Kpi titulo="Edad promedio" valor={kpis.edadProm} detalle="Participantes con dato demográfico" />
             ) : (
               <Kpi
