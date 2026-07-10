@@ -63,12 +63,18 @@ Dos niveles de jerarquía metálica:
 `bg-white/75 + backdrop-blur + borde y sombra vía variables de tema`. Contenedor
 estándar de KPIs, gráficos y selectores sobre los fondos animados.
 
-### 4.5 Tema por programa (2026-07-10)
-El contenedor `#panel` define variables CSS (`--acento`, `--glass-borde`,
-`--glass-sombra`) que el chrome consume: números KPI (`.kpi-valor`), bordes y
-sombras de las tarjetas glass. Al seleccionar **Mujeres ROFÉ** se aplica la clase
-`tema-mr` y la paleta del chrome pasa a la gama del programa (naranja `#D1793F` y
-derivados cálidos en alfas); JC mantiene el azul `#406C9E`. Transiciones de 0.3s.
+### 4.5 Tema por programa (2026-07-10, v1.2: rosado MR)
+Al seleccionar **Mujeres ROFÉ** el sitio completo cambia a la gama ROSADA de la
+sección (paleta del panel `docs/mujeres-rofe`: base rojo/rosa de marca `#C12D4C`
++ tintes `#FDF6F8 / #FAF0F3 / #F0DDE2 / #E5C5CC`); con Jóvenes creaTIvos vuelve
+al azul `#406C9E`. Piezas del tema:
+- **Hero:** gradiente `#3a1120 → #7a1f38 → #C12D4C` (derivados oscuros del rojo,
+  solo-fondos), halo `#E5C5CC/25`, partículas con prioridad rosa (`PARTICULAS_MR`)
+  y chispa amarilla, botón `liquid-metal-rosa`.
+- **Fondo de página:** `body.tema-mr-body` → `#FAF0F3` (transición 0.5s); el
+  fade inferior del hero funde al mismo tono. Trazos de fondo en `#C12D4C`.
+- **Chrome del panel:** `#panel.tema-mr` → `--acento #C12D4C`, bordes/sombras
+  glass en alfas rosa. Pill del selector MR: `pill-metal-rosa`.
 Los colores SEMÁNTICOS de los gráficos (verde=aprobó, amarillo=en curso,
 rojo=retirado…) NO cambian con el tema — el significado del color es invariante.
 
@@ -80,7 +86,9 @@ rojo=retirado…) NO cambian con el tema — el significado del color es invaria
 5. `prefers-reduced-motion` no es opcional.
 
 ---
-**Versión:** 1.1 · 2026-07-10 · Panel de Datos ROFÉ
+**Versión:** 1.2 · 2026-07-10 · Panel de Datos ROFÉ
 **Cambios:** 1.0 creación — hero de partículas, trazos de fondo, botón metal líquido,
 tarjetas glass, sistema de movimiento y derivados de fondo del azul de marca.
 1.1 — tema por programa (chrome naranja al seleccionar Mujeres ROFÉ).
+1.2 — tema MR completo en ROSADO (hero, partículas, fondo de página, trazos,
+chrome) con la paleta del panel docs/mujeres-rofe; reemplaza el naranja de 1.1.

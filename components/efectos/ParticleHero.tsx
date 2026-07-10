@@ -8,6 +8,8 @@
 import { useEffect, useRef } from 'react';
 
 const COLORES = ['#EEC935', '#D1793F', '#6EA050', '#6FA0BC', '#83B6DD', '#C12D4C'];
+// rgb del color de las líneas de conexión (JC: azul claro de marca)
+const ENLACE_DEFAULT = '131, 182, 221';
 
 interface Particula {
   x: number;
@@ -19,7 +21,15 @@ interface Particula {
   alpha: number;
 }
 
-export function ParticleHero({ className = '' }: { className?: string }) {
+export function ParticleHero({
+  className = '',
+  paleta = COLORES,
+  colorEnlace = ENLACE_DEFAULT,
+}: {
+  className?: string;
+  paleta?: string[];
+  colorEnlace?: string; // "r, g, b"
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -50,7 +60,7 @@ export function ParticleHero({ className = '' }: { className?: string }) {
         vx: (Math.random() - 0.5) * 0.35,
         vy: (Math.random() - 0.5) * 0.35,
         r: 1 + Math.random() * 2.2,
-        color: COLORES[Math.floor(Math.random() * COLORES.length)],
+        color: paleta[Math.floor(Math.random() * paleta.length)],
         alpha: 0.35 + Math.random() * 0.5,
       }));
     };
@@ -66,7 +76,7 @@ export function ParticleHero({ className = '' }: { className?: string }) {
           const dy = a.y - b.y;
           const d2 = dx * dx + dy * dy;
           if (d2 < 110 * 110) {
-            ctx.strokeStyle = `rgba(131, 182, 221, ${0.12 * (1 - d2 / (110 * 110))})`;
+            ctx.strokeStyle = `rgba(${colorEnlace}, ${0.12 * (1 - d2 / (110 * 110))})`;
             ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(a.x, a.y);
@@ -135,7 +145,7 @@ export function ParticleHero({ className = '' }: { className?: string }) {
       canvas.removeEventListener('mousemove', onMouse);
       canvas.removeEventListener('mouseleave', onLeave);
     };
-  }, []);
+  }, [paleta, colorEnlace]);
 
   return <canvas ref={ref} className={`absolute inset-0 h-full w-full ${className}`} />;
 }

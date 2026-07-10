@@ -91,6 +91,12 @@ export default function Pagina() {
     cargarTodo().then(setDatos).catch((e) => setError(String(e)));
   }, []);
 
+  // Fondo de página rosado mientras el programa activo sea Mujeres ROFÉ
+  useEffect(() => {
+    document.body.classList.toggle('tema-mr-body', programa === 'mr');
+    return () => document.body.classList.remove('tema-mr-body');
+  }, [programa]);
+
   const cohortes = useMemo(
     () =>
       datos
@@ -165,7 +171,7 @@ export default function Pagina() {
   if (error)
     return (
       <>
-        <Hero />
+        <Hero tema={programa} />
         <div className="max-w-6xl mx-auto px-4 py-8">
           <div className="bg-rofe-rojo/10 border border-rofe-rojo text-rofe-rojo rounded-xl p-6">
             <p className="font-bold">No se pudieron cargar los datos.</p>
@@ -179,7 +185,7 @@ export default function Pagina() {
   if (!datos || !kpis)
     return (
       <>
-        <Hero />
+        <Hero tema={programa} />
         <div className="max-w-6xl mx-auto px-4 py-8 animate-pulse space-y-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[...Array(4)].map((_, i) => (
@@ -218,8 +224,8 @@ export default function Pagina() {
 
   return (
     <>
-      <Hero />
-      <BackgroundPaths />
+      <Hero tema={programa} />
+      <BackgroundPaths tema={programa} />
       {/* tema-mr activa la paleta naranja de Mujeres ROFÉ en todo el panel */}
       <div
         id="panel"
@@ -235,7 +241,7 @@ export default function Pagina() {
               className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
                 programa === p
                   ? p === 'mr'
-                    ? 'pill-metal pill-metal-naranja'
+                    ? 'pill-metal pill-metal-rosa'
                     : 'pill-metal pill-metal-azul'
                   : 'text-slate-600 hover:bg-slate-100'
               }`}

@@ -4,12 +4,18 @@
 
 body {
   @apply bg-slate-50 text-slate-800 antialiased;
+  transition: background-color 0.5s ease;
+}
+/* Fondo rosado de página cuando el programa activo es Mujeres ROFÉ
+   (tintes del panel docs/mujeres-rofe: #FAF0F3 / #FDF6F8) */
+body.tema-mr-body {
+  background-color: #faf0f3;
 }
 
 /* ── Tema por programa ───────────────────────────────────────────────────────
-   El panel cambia de paleta según el programa activo (BRAND-DIGITAL: azul
-   #406C9E = Jóvenes creaTIvos · naranja #D1793F = Mujeres ROFÉ). Variables en
-   el contenedor #panel; .tema-mr las cambia a la gama cálida de la sección. */
+   El panel cambia de paleta según el programa activo: azul #406C9E = Jóvenes
+   creaTIvos · rosa #C12D4C + tintes rosados = Mujeres ROFÉ (paleta del panel
+   docs/mujeres-rofe). Variables en #panel; .tema-mr las cambia a la gama rosa. */
 #panel {
   --acento: #406c9e;                      /* números KPI */
   --glass-borde: rgba(255, 255, 255, 0.6);
@@ -17,10 +23,10 @@ body {
   --glass-sombra-hover: rgba(43, 74, 111, 0.14);
 }
 #panel.tema-mr {
-  --acento: #d1793f;
-  --glass-borde: rgba(209, 121, 63, 0.35);
-  --glass-sombra: rgba(168, 90, 42, 0.12);
-  --glass-sombra-hover: rgba(168, 90, 42, 0.2);
+  --acento: #c12d4c;
+  --glass-borde: rgba(193, 45, 76, 0.25);
+  --glass-sombra: rgba(193, 45, 76, 0.1);
+  --glass-sombra-hover: rgba(193, 45, 76, 0.18);
 }
 .kpi-valor {
   color: var(--acento, #406c9e);
@@ -55,6 +61,23 @@ body {
   to {
     --metal-ang: 360deg;
   }
+}
+/* Variante rosa del botón (tema Mujeres ROFÉ) */
+.liquid-metal-rosa {
+  background:
+    linear-gradient(#7a1f38, #7a1f38) padding-box,
+    conic-gradient(
+        from var(--metal-ang, 0deg),
+        #c12d4c,
+        #e5c5cc,
+        #eec935,
+        #e5c5cc,
+        #c12d4c
+      )
+      border-box;
+  box-shadow:
+    0 4px 18px rgba(193, 45, 76, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .liquid-metal-shine {
   left: -40%;
@@ -110,6 +133,12 @@ body {
 }
 .pill-metal-naranja {
   background: linear-gradient(135deg, #a85a2a, #d1793f 45%, #e09a63 78%, #d1793f);
+  animation-delay: -0.6s;
+}
+.pill-metal-rosa {
+  background: linear-gradient(135deg, #8f1f38, #c12d4c 45%, #e5798f 78%, #c12d4c);
+}
+.pill-metal-rosa::after {
   animation-delay: -0.6s;
 }
 .pill-metal-verde {

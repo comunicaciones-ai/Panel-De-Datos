@@ -6,7 +6,7 @@
 
 import { motion, useReducedMotion } from 'framer-motion';
 
-function Trazos({ posicion }: { posicion: number }) {
+function Trazos({ posicion, esMr }: { posicion: number; esMr: boolean }) {
   const reducido = useReducedMotion();
   const paths = Array.from({ length: 30 }, (_, i) => ({
     id: i,
@@ -23,7 +23,7 @@ function Trazos({ posicion }: { posicion: number }) {
 
   return (
     <svg
-      className="pointer-events-none h-full w-full text-rofe-azul"
+      className={`pointer-events-none h-full w-full ${esMr ? 'text-rofe-rojo' : 'text-rofe-azul'}`}
       viewBox="0 0 696 316"
       fill="none"
       preserveAspectRatio="xMidYMid slice"
@@ -62,14 +62,15 @@ function Trazos({ posicion }: { posicion: number }) {
   );
 }
 
-export function BackgroundPaths() {
+export function BackgroundPaths({ tema = 'jc' }: { tema?: 'jc' | 'mr' }) {
+  const esMr = tema === 'mr';
   return (
     <div aria-hidden className="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
       <div className="absolute inset-0 opacity-60">
-        <Trazos posicion={1} />
+        <Trazos posicion={1} esMr={esMr} />
       </div>
       <div className="absolute inset-0 opacity-40 -scale-x-100">
-        <Trazos posicion={-1} />
+        <Trazos posicion={-1} esMr={esMr} />
       </div>
     </div>
   );
