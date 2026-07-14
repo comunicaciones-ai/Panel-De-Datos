@@ -26,6 +26,7 @@ import { BackgroundPaths } from '@/components/efectos/BackgroundPaths';
 
 type Programa = 'jc' | 'mr';
 type Tab = 'Resumen' | 'Cursos' | 'Historial' | 'Emprendimiento' | 'Demografía';
+type Ciudad = string | null;
 
 // La cohorte "actual" NO va hardcodeada: es la mayor presente en los datos, así el
 // cambio de año no requiere tocar el frontend (el ETL escribe la cohorte nueva y listo).
@@ -85,6 +86,7 @@ export default function Pagina() {
   const [programa, setPrograma] = useState<Programa>('jc');
   // null = "la cohorte actual" (se resuelve con los datos; no hardcodear el año)
   const [cohorteElegida, setCohorteElegida] = useState<string | null>(null);
+  const [ciudadElegida, setCiudadElegida] = useState<Ciudad>(null);
   const [tab, setTab] = useState<Tab>('Resumen');
 
   useEffect(() => {
@@ -108,12 +110,29 @@ export default function Pagina() {
   const cohorte = cohorteElegida ?? cohorteActual;
   const esActual = cohorte === cohorteActual && cohorte !== '';
 
+  const ciudades = useMemo(
+    () =>
+      datos
+        ? Array.from(new Set(datos.demografia.map((d) => d.grupo_ciudad))).sort()
+        : [],
+    [datos],
+  );
+
   const cursosProg = useMemo(
     () =>
       datos
         ? datos.cursos.filter((c) => c.programa === programa && c.cohorte === cohorte)
         : [],
     [datos, programa, cohorte],
+  );
+
+  const participantesFiltrados = useMemo(
+    () => {
+      if (!datos || programa !== 'jc') return datos?.demografia ?? [];
+      if (!ciudadElegida) return datos.demografia;
+      return datos.demografia.filter((d) => d.grupo_ciudad === ciudadElegida);
+    },
+    [datos, programa, ciudadElegida],
   );
 
   const historialProg = useMemo(
@@ -139,20 +158,30 @@ export default function Pagina() {
     const co = datos.cohorte.find((c) => c.cohorte === cohorte && c.programa === programa);
     // Ingresados canónicos (cohorte completa: activos + retirados)
     const ing = datos.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa);
+
+    // Si hay ciudad elegida (solo para JC), calcular participantes de esa ciudad
+    let participantes = ps?.participantes ?? 0;
+    let edadProm = co?.edad_promedio ? Number(co.edad_promedio).toFixed(1) : '—';
+    if (programa === 'jc' && ciudadElegida && participantesFiltrados.length > 0) {
+      participantes = participantesFiltrados.reduce((sum, d) => sum + d.total, 0);
+      const edadPromCiudad = participantesFiltrados[0]?.edad_promedio;
+      edadProm = edadPromCiudad ? Number(edadPromCiudad).toFixed(1) : '—';
+    }
+
     return {
-      participantes: ps?.participantes ?? 0,
+      participantes,
       matriculas: ps?.matriculas ?? 0,
       pctCompletadas: ps?.matriculas
         ? Math.round((100 * ps.completadas) / ps.matriculas)
         : 0,
       promedio: ps?.promedio_avance ? `${ps.promedio_avance}%` : '—',
-      edadProm: co?.edad_promedio ? Number(co.edad_promedio).toFixed(1) : '—',
+      edadProm,
       empMarcha: datos.emprendimiento.find((e) => e.situacion === 'en_marcha')?.total ?? 0,
       ingresados: ing?.ingresados ?? null,
       activos: ing?.activos ?? null,
       retirados: ing?.retirados ?? null,
     };
-  }, [datos, programa, cohorte]);
+  }, [datos, programa, cohorte, ciudadElegida, participantesFiltrados]);
 
   const ajustarTab = (p: Programa, actual: boolean) => {
     if (!tabsDisponibles(p, actual).includes(tab)) setTab('Resumen');
@@ -266,6 +295,34 @@ export default function Pagina() {
             </button>
           ))}
         </div>
+        {/* Selector de ciudad (solo JC) */}
+        {programa === 'jc' && ciudades.length > 0 && (
+          <div className="flex gap-1 tarjeta-glass p-1 flex-wrap">
+            <button
+              onClick={() => setCiudadElegida(null)}
+              className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                ciudadElegida === null
+                  ? 'pill-metal pill-metal-amarillo'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Todas
+            </button>
+            {ciudades.map((ciudad) => (
+              <button
+                key={ciudad}
+                onClick={() => setCiudadElegida(ciudad)}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  ciudadElegida === ciudad
+                    ? 'pill-metal pill-metal-naranja'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {ETIQUETA_GRUPO[ciudad] ?? ciudad}
+              </button>
+            ))}
+          </div>
+        )}
         {/* Tabs del programa/cohorte activos */}
         <nav className="flex gap-1 tarjeta-glass p-1 flex-wrap">
           {tabsDisponibles(programa, esActual).map((t) => (
@@ -547,10 +604,12 @@ export default function Pagina() {
       {tab === 'Demografía' && programa === 'jc' && (
         <>
           <div className="grid md:grid-cols-2 gap-6">
-            <Seccion titulo="Participantes por grupo" nota="Grupos operativos por ciudad — Jóvenes creaTIvos.">
+            <Seccion
+              titulo={ciudadElegida ? `Participantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : "Participantes por grupo"}
+              nota={ciudadElegida ? `Desglose de participantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}.` : "Grupos operativos por ciudad — Jóvenes creaTIvos."}>
               <GraficoBarras
-                datos={datos.demografia.map((d) => ({
-                  etiqueta: ETIQUETA_GRUPO[d.grupo_ciudad] ?? d.grupo_ciudad,
+                datos={participantesFiltrados.map((d) => ({
+                  etiqueta: ciudadElegida ? ETIQUETA_GRUPO[d.grupo_ciudad] ?? d.grupo_ciudad : ETIQUETA_GRUPO[d.grupo_ciudad] ?? d.grupo_ciudad,
                   total: d.total,
                 }))}
                 dataKey="total"
@@ -559,9 +618,9 @@ export default function Pagina() {
                 rotarEtiquetas
               />
             </Seccion>
-            <Seccion titulo="Género por grupo">
+            <Seccion titulo={ciudadElegida ? `Género en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : "Género por grupo"}>
               <GraficoDemografia
-                datos={datos.demografia.map((d) => ({
+                datos={participantesFiltrados.map((d) => ({
                   ...d,
                   grupo_ciudad: ETIQUETA_GRUPO[d.grupo_ciudad] ?? d.grupo_ciudad,
                 }))}
