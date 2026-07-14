@@ -140,7 +140,7 @@ export interface CursoCompletionPorCiudad {
   matriculados: number;
   completados: number;
   promedio_avance: string | null;
-  pct_completados: number | null;
+  pct_completados: string | number | null; // Viene de Supabase como string, convertir en frontend
 }
 
 export interface ProgramaStatsPorCiudad {

@@ -139,9 +139,24 @@ export default function Pagina() {
   const cursosPorCiudadFiltrados = useMemo(
     () => {
       if (!datos || programa !== 'jc' || !ciudadElegida) return cursosProg;
-      return datos.cursosPorCiudad?.filter(
+      const filtrados = datos.cursosPorCiudad?.filter(
         (c) => c.programa === programa && c.cohorte === cohorte && c.grupo_ciudad === ciudadElegida
       ) ?? [];
+
+      // Debug: verificar qué se está filtrando
+      if (ciudadElegida) {
+        console.log('🔍 DEBUG cursosPorCiudadFiltrados:', {
+          ciudadElegida,
+          programa,
+          cohorte,
+          datosDisponibles: datos.cursosPorCiudad?.length ?? 0,
+          filtrados: filtrados.length,
+          primerosRegistros: filtrados.slice(0, 2),
+          ciudadesenDatos: Array.from(new Set(datos.cursosPorCiudad?.map((c) => c.grupo_ciudad) ?? [])),
+        });
+      }
+
+      return filtrados;
     },
     [datos, programa, cohorte, ciudadElegida, cursosProg],
   );
