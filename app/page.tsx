@@ -25,7 +25,7 @@ import { Hero } from '@/components/efectos/Hero';
 import { BackgroundPaths } from '@/components/efectos/BackgroundPaths';
 
 type Programa = 'jc' | 'mr';
-type Tab = 'Resumen' | 'Cursos' | 'Historial' | 'Emprendimiento' | 'Demografía';
+type Tab = 'Resumen' | 'Cursos' | 'Historial' | 'Emprendimiento' | 'Demografía' | 'Emoflow';
 type Ciudad = string | null;
 
 // La cohorte "actual" NO va hardcodeada: es la mayor presente en los datos, así el
@@ -34,10 +34,12 @@ type Ciudad = string | null;
 // programas con fuentes distintas (JC: BD monitorias · MR: BD-Mujeres ROFÉ, vista
 // v_mr_demografia). El Historial (serie diaria) arranca en la cohorte 2026.
 // Cohortes pasadas (importadas de Q10): Resumen + Cursos.
+// Emoflow (ingresos al sistema) es solo JC —0 matrículas MR en la fuente— y solo cohorte
+// actual: la pestaña de origen no tiene dimensión de cohorte.
 function tabsDisponibles(programa: Programa, esActual: boolean): Tab[] {
   if (!esActual) return ['Resumen', 'Cursos'];
   return programa === 'jc'
-    ? ['Resumen', 'Cursos', 'Historial', 'Emprendimiento', 'Demografía']
+    ? ['Resumen', 'Cursos', 'Historial', 'Emprendimiento', 'Demografía', 'Emoflow']
     : ['Resumen', 'Cursos', 'Historial', 'Demografía'];
 }
 
@@ -173,6 +175,58 @@ export default function Pagina() {
     },
     [datos, programa, ciudadElegida],
   );
+
+  // Emoflow — KPIs. Sin ciudad: agregado nacional (v_emoflow_resumen). Con ciudad: la fila de
+  // esa ciudad. Mismo patrón "nacional vs *PorCiudad" del resto del panel.
+  const emoflowKpis = useMemo(() => {
+    if (!datos) return null;
+    if (ciudadElegida) {
+      const c = datos.emoflowPorCiudad?.find((e) => e.grupo_ciudad === ciudadElegida);
+      if (!c) return null;
+      return {
+        participantes: c.participantes,
+        promedio: Number(c.ingresos_promedio ?? 0),
+        mediana: c.ingresos_mediana ?? 0,
+        activos7: c.activos_7d,
+        inactivos30: c.inactivos_30d,
+      };
+    }
+    const r = datos.emoflowResumen?.[0];
+    if (!r) return null;
+    return {
+      participantes: r.participantes,
+      promedio: Number(r.ingresos_promedio ?? 0),
+      mediana: r.ingresos_mediana ?? 0,
+      activos7: r.activos_7d,
+      inactivos30: r.inactivos_30d,
+    };
+  }, [datos, ciudadElegida]);
+
+  // Emoflow — bandas de uso. Con ciudad elegida hay que usar la vista desglosada: mostrar las
+  // bandas nacionales dentro de una vista de ciudad sería mezclar universos.
+  const emoflowBandas = useMemo(() => {
+    if (!datos) return [];
+    const filas = ciudadElegida
+      ? (datos.emoflowBandasCiudad ?? []).filter((b) => b.grupo_ciudad === ciudadElegida)
+      : (datos.emoflowBandas ?? []);
+    return [...filas]
+      .sort((a, b) => a.orden - b.orden)
+      .map((b) => ({
+        etiqueta: b.banda,
+        participantes: b.participantes,
+        pct_aprobacion: Number(b.pct_aprobacion ?? 0),
+      }));
+  }, [datos, ciudadElegida]);
+
+  // Uso por ciudad — solo tiene sentido en la vista nacional (con una ciudad elegida sería
+  // una sola barra).
+  const emoflowCiudades = useMemo(() => {
+    if (!datos) return [];
+    return (datos.emoflowPorCiudad ?? []).map((c) => ({
+      etiqueta: ETIQUETA_GRUPO[c.grupo_ciudad] ?? c.grupo_ciudad,
+      ingresos_promedio: Number(c.ingresos_promedio ?? 0),
+    }));
+  }, [datos]);
 
   // Aprobación canónica de la cohorte (cursaron = activos + retirados) por programa
   const aprobacionProg = useMemo(
@@ -737,6 +791,82 @@ export default function Pagina() {
               color={C.naranja}
             />
           </Seccion>
+        </>
+      )}
+
+      {tab === 'Emoflow' && programa === 'jc' && (
+        <>
+          {emoflowKpis ? (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <Kpi
+                  titulo={ciudadElegida ? `Estudiantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : 'Estudiantes con Emoflow'}
+                  valor={emoflowKpis.participantes.toLocaleString('es-CO')}
+                  detalle={ciudadElegida ? undefined : 'de 777 activos (97%)'}
+                />
+                <Kpi
+                  titulo="Ingresos promedio"
+                  valor={emoflowKpis.promedio.toFixed(1)}
+                  detalle={`mediana ${emoflowKpis.mediana}`}
+                />
+                <Kpi
+                  titulo="Activos últimos 7 días"
+                  valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)}%` : '—'}
+                  detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} estudiantes`}
+                />
+                <Kpi
+                  titulo="Sin entrar hace +30 días"
+                  valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.inactivos30 / emoflowKpis.participantes) * 100)}%` : '—'}
+                  detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} estudiantes`}
+                />
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6">
+                <Seccion
+                  titulo="Distribución de uso"
+                  nota="Ingresos = veces que el estudiante entró al sistema (acumulado). Cubre 757 de los 777 activos (97%).">
+                  <GraficoBarras
+                    datos={emoflowBandas}
+                    dataKey="participantes"
+                    nombre="Estudiantes"
+                    color={C.azul2}
+                  />
+                </Seccion>
+
+                <Seccion
+                  titulo="¿El que más entra, aprueba más?"
+                  nota="% de aprobación de cada banda de uso.">
+                  <GraficoBarras
+                    datos={emoflowBandas}
+                    dataKey="pct_aprobacion"
+                    nombre="Aprobación %"
+                    color={C.verde}
+                    dominioMax={100}
+                  />
+                  <p className="text-xs text-slate-400 mt-2">
+                    La relación es real pero suave: quienes menos entran aprueban ~82% y quienes más
+                    entran ~88%. Sirve para detectar el extremo bajo, no como predictor fino.
+                  </p>
+                </Seccion>
+              </div>
+
+              {!ciudadElegida && (
+                <Seccion titulo="Uso por ciudad" nota="Promedio de ingresos al sistema por grupo operativo.">
+                  <GraficoBarras
+                    datos={emoflowCiudades}
+                    dataKey="ingresos_promedio"
+                    nombre="Ingresos promedio"
+                    color={C.naranja}
+                    rotarEtiquetas
+                  />
+                </Seccion>
+              )}
+            </>
+          ) : (
+            <Seccion titulo="Emoflow">
+              <p className="text-sm text-slate-500">Sin datos de Emoflow para esta selección.</p>
+            </Seccion>
+          )}
         </>
       )}
       </div>
