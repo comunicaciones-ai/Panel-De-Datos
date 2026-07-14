@@ -438,9 +438,9 @@ export default function Pagina() {
               <GraficoCursos
                 datos={ciudadElegida
                   ? cursosPorCiudadFiltrados.map((c) => ({
-                      curso: c.curso,
-                      completados: c.completados,
-                      en_progreso: Math.max(0, (c.matriculados ?? 0) - (c.completados ?? 0)),
+                      curso: c.curso ?? '(sin nombre)',
+                      completados: Number(c.completados ?? 0),
+                      en_progreso: Math.max(0, Number(c.matriculados ?? 0) - Number(c.completados ?? 0)),
                       sin_iniciar: 0,
                     }))
                   : cursosProg}
@@ -517,9 +517,9 @@ export default function Pagina() {
             <GraficoCursos
               datos={ciudadElegida
                 ? cursosPorCiudadFiltrados.map((c) => ({
-                    curso: c.curso,
-                    completados: c.completados,
-                    en_progreso: Math.max(0, (c.matriculados ?? 0) - (c.completados ?? 0)),
+                    curso: c.curso ?? '(sin nombre)',
+                    completados: Number(c.completados ?? 0),
+                    en_progreso: Math.max(0, Number(c.matriculados ?? 0) - Number(c.completados ?? 0)),
                     sin_iniciar: 0,
                   }))
                 : cursosProg}
