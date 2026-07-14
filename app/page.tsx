@@ -159,24 +159,38 @@ export default function Pagina() {
     // Ingresados canónicos (cohorte completa: activos + retirados)
     const ing = datos.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa);
 
-    // Si hay ciudad elegida (solo para JC), calcular participantes de esa ciudad
+    // Si hay ciudad elegida (solo para JC), usar datos filtrados por ciudad
     let participantes = ps?.participantes ?? 0;
+    let matriculas = ps?.matriculas ?? 0;
+    let completadas = ps?.completadas ?? 0;
+    let promedio = ps?.promedio_avance ? `${ps.promedio_avance}%` : '—';
     let edadProm = co?.edad_promedio ? Number(co.edad_promedio).toFixed(1) : '—';
-    if (programa === 'jc' && ciudadElegida && participantesFiltrados.length > 0) {
-      participantes = participantesFiltrados.reduce((sum, d) => sum + d.total, 0);
-      const edadPromCiudad = participantesFiltrados[0]?.edad_promedio;
-      edadProm = edadPromCiudad ? Number(edadPromCiudad).toFixed(1) : '—';
+    let empMarcha = datos.emprendimiento.find((e) => e.situacion === 'en_marcha')?.total ?? 0;
+
+    if (programa === 'jc' && ciudadElegida) {
+      const statsCiudad = datos.statsProgramaPorCiudad?.find((s) => s.grupo_ciudad === ciudadElegida);
+      if (statsCiudad) {
+        participantes = statsCiudad.participantes;
+        matriculas = statsCiudad.matriculas;
+        completadas = statsCiudad.completadas;
+        promedio = statsCiudad.promedio_avance ? `${statsCiudad.promedio_avance}%` : '—';
+        empMarcha = statsCiudad.con_emprendimiento;
+      }
+
+      // Edad promedio de la ciudad seleccionada
+      const ciudadDem = participantesFiltrados[0];
+      if (ciudadDem?.edad_promedio) {
+        edadProm = Number(ciudadDem.edad_promedio).toFixed(1);
+      }
     }
 
     return {
       participantes,
-      matriculas: ps?.matriculas ?? 0,
-      pctCompletadas: ps?.matriculas
-        ? Math.round((100 * ps.completadas) / ps.matriculas)
-        : 0,
-      promedio: ps?.promedio_avance ? `${ps.promedio_avance}%` : '—',
+      matriculas,
+      pctCompletadas: matriculas ? Math.round((100 * completadas) / matriculas) : 0,
+      promedio,
       edadProm,
-      empMarcha: datos.emprendimiento.find((e) => e.situacion === 'en_marcha')?.total ?? 0,
+      empMarcha,
       ingresados: ing?.ingresados ?? null,
       activos: ing?.activos ?? null,
       retirados: ing?.retirados ?? null,

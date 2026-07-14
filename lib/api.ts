@@ -131,10 +131,33 @@ export interface MrDemografia {
   total: number;
 }
 
+// Datos filtrados por ciudad (JC solamente)
+export interface CursoCompletionPorCiudad {
+  curso: string;
+  cohorte: string;
+  programa: 'jc' | 'mr' | 'stand' | null;
+  grupo_ciudad: string;
+  matriculados: number;
+  completados: number;
+  promedio_avance: string | null;
+  pct_completados: number | null;
+}
+
+export interface ProgramaStatsPorCiudad {
+  grupo_ciudad: string;
+  participantes: number;
+  matriculas: number;
+  completadas: number;
+  promedio_avance: string | null;
+  con_emprendimiento: number;
+}
+
 export interface Datos {
   cohorte: CohorteStats[];
   cursos: CursoCompletion[];
+  cursosPorCiudad: CursoCompletionPorCiudad[];
   demografia: DemografiaGrupo[];
+  statsProgramaPorCiudad: ProgramaStatsPorCiudad[];
   emprendimiento: EmprendimientoSituacion[];
   empVsCursos: EmprendimientoVsCursos[];
   edades: EdadDistribucion[];
@@ -146,11 +169,13 @@ export interface Datos {
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, demografia, emprendimiento, empVsCursos, edades, programas, historial, mrDemografia, ingresos, aprobacion] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, empVsCursos, edades, programas, historial, mrDemografia, ingresos, aprobacion] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
+      leer<CursoCompletionPorCiudad>('v_curso_completion_por_ciudad?order=matriculados.desc'),
       leer<DemografiaGrupo>('v_demografia_grupo?order=total.desc'),
+      leer<ProgramaStatsPorCiudad>('v_programa_stats_por_ciudad?order=participantes.desc'),
       leer<EmprendimientoSituacion>('v_emprendimiento_situacion'),
       leer<EmprendimientoVsCursos>('v_emprendimiento_vs_cursos'),
       leer<EdadDistribucion>('v_edad_distribucion?order=orden.asc'),
@@ -160,7 +185,7 @@ export async function cargarTodo(): Promise<Datos> {
       leer<CohorteIngresos>('cohorte_ingresos'),
       leer<AprobacionCurso>('aprobacion_cursos?order=cursaron.desc'),
     ]);
-  return { cohorte, cursos, demografia, emprendimiento, empVsCursos, edades, programas, historial, mrDemografia, ingresos, aprobacion };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, empVsCursos, edades, programas, historial, mrDemografia, ingresos, aprobacion };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {
