@@ -111,6 +111,15 @@ export interface CohorteEstudiantes {
   prom_cursos_inscritos: number | string | null;
 }
 
+// v_cohorte_estudiantes_distribucion: cuántos estudiantes han aprobado N cursos (>80%) en la
+// cohorte. Complementa la vista por curso (matrículas). Solo conteos agregados, sin PII.
+export interface CohorteEstudiantesDistribucion {
+  cohorte: string;
+  programa: 'jc' | 'mr' | 'stand';
+  cursos_aprobados: number;
+  estudiantes: number;
+}
+
 // aprobacion_cursos: avance de la cohorte COMPLETA por curso (cursaron = activos + retirados)
 export interface AprobacionCurso {
   cohorte: string;
@@ -242,6 +251,7 @@ export interface Datos {
   ingresos: CohorteIngresos[];
   aprobacion: AprobacionCurso[];
   estudiantes: CohorteEstudiantes[];
+  estudiantesDist: CohorteEstudiantesDistribucion[];
   emoflowResumen: EmoflowResumen[];
   emoflowPorCiudad: EmoflowPorCiudad[];
   emoflowBandas: EmoflowBanda[];
@@ -249,7 +259,7 @@ export interface Datos {
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -267,12 +277,13 @@ export async function cargarTodo(): Promise<Datos> {
       leer<CohorteIngresos>('cohorte_ingresos'),
       leer<AprobacionCurso>('aprobacion_cursos?order=cursaron.desc'),
       leer<CohorteEstudiantes>('v_cohorte_estudiantes'),
+      leer<CohorteEstudiantesDistribucion>('v_cohorte_estudiantes_distribucion?order=cursos_aprobados.asc'),
       leer<EmoflowResumen>('v_emoflow_resumen'),
       leer<EmoflowPorCiudad>('v_emoflow_por_ciudad?order=participantes.desc'),
       leer<EmoflowBanda>('v_emoflow_bandas?order=orden.asc'),
       leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad?order=orden.asc'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {

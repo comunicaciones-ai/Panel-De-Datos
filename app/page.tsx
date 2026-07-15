@@ -258,6 +258,21 @@ export default function Pagina() {
     [datos, programa, cohorte],
   );
 
+  // Distribución de estudiantes por # de cursos aprobados (histograma). Se rellenan los huecos
+  // (0..max) para que el eje sea continuo y muestre honestamente los tramos sin nadie.
+  const distribucionEst = useMemo(() => {
+    if (!datos) return [] as { etiqueta: string; estudiantes: number }[];
+    const filas = datos.estudiantesDist.filter(
+      (d) => d.cohorte === cohorte && d.programa === programa,
+    );
+    if (filas.length === 0) return [];
+    const max = Math.max(...filas.map((f) => f.cursos_aprobados));
+    return Array.from({ length: max + 1 }, (_, n) => ({
+      etiqueta: String(n),
+      estudiantes: filas.find((f) => f.cursos_aprobados === n)?.estudiantes ?? 0,
+    }));
+  }, [datos, cohorte, programa]);
+
   const kpis = useMemo(() => {
     if (!datos) return null;
     const ps = datos.programas.find(
@@ -674,59 +689,106 @@ export default function Pagina() {
 
       {tab === 'Cursos' && esActual && aprobacionProg.length > 0 && (
         <>
-          <Seccion
-            titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
-            nota={`Cada barra suma la cohorte completa que cursó: aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro.`}
-          >
-            <GraficoAprobacion
-              datos={aprobacionProg.map((a) => ({
-                curso: a.curso,
-                aprobados: a.aprobados,
-                en_curso: (a.banda_0_25 ?? 0) + (a.banda_26_80 ?? 0),
-                aprobados_retirados: a.aprobados_retirados,
-                retirados: a.retirados,
-              }))}
-            />
-          </Seccion>
-          <Seccion titulo="Detalle por curso (cohorte completa)">
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-slate-500 border-b border-slate-200">
-                    <th className="py-2 pr-4">Curso</th>
-                    <th className="py-2 pr-4 text-right">Cursaron</th>
-                    <th className="py-2 pr-4 text-right">Aprobaron</th>
-                    <th className="py-2 pr-4 text-right">En curso</th>
-                    <th className="py-2 pr-4 text-right">Retirados sin aprobar</th>
-                    <th className="py-2 pr-4 text-right">% Aprobados</th>
-                    <th className="py-2 text-right">Avance promedio</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {aprobacionProg.map((a) => (
-                    <tr key={a.curso} className="border-b border-slate-100">
-                      <td className="py-2 pr-4">{a.curso}</td>
-                      <td className="py-2 pr-4 text-right">{a.cursaron}</td>
-                      <td className="py-2 pr-4 text-right">
-                        {a.aprobados_total ?? a.aprobados + a.aprobados_retirados}
-                      </td>
-                      <td className="py-2 pr-4 text-right">
-                        {(a.banda_0_25 ?? 0) + (a.banda_26_80 ?? 0)}
-                      </td>
-                      <td className="py-2 pr-4 text-right">{a.retirados}</td>
-                      <td className="py-2 pr-4 text-right font-medium">{a.pct_aprobados ?? '—'}%</td>
-                      <td className="py-2 text-right">{a.promedio ?? '—'}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="text-xs text-slate-400 mt-2">
-              Aprobaron incluye a quienes superaron el 80% antes de retirarse. Fuente: panel de
-              aprobación (definición canónica de la cohorte, sin perfiles de prueba ni retiros
-              institucionales).
-            </p>
-          </Seccion>
+          {/* Toggle matrículas / estudiantes — comparte estado con el Resumen */}
+          <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4">
+            {([['matriculas', 'Por matrículas'], ['estudiantes', 'Por estudiantes']] as const).map(
+              ([u, txt]) => (
+                <button
+                  key={u}
+                  onClick={() => setUnidadEstado(u)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                    unidadEstado === u
+                      ? programa === 'mr'
+                        ? 'pill-metal pill-metal-rosa'
+                        : 'pill-metal pill-metal-azul'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {txt}
+                </button>
+              ),
+            )}
+          </div>
+
+          {unidadEstado === 'matriculas' ? (
+            <>
+              <Seccion
+                titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
+                nota={`Cada barra suma la cohorte completa que cursó: aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro.`}
+              >
+                <GraficoAprobacion
+                  datos={aprobacionProg.map((a) => ({
+                    curso: a.curso,
+                    aprobados: a.aprobados,
+                    en_curso: (a.banda_0_25 ?? 0) + (a.banda_26_80 ?? 0),
+                    aprobados_retirados: a.aprobados_retirados,
+                    retirados: a.retirados,
+                  }))}
+                />
+              </Seccion>
+              <Seccion titulo="Detalle por curso (cohorte completa)">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b border-slate-200">
+                        <th className="py-2 pr-4">Curso</th>
+                        <th className="py-2 pr-4 text-right">Cursaron</th>
+                        <th className="py-2 pr-4 text-right">Aprobaron</th>
+                        <th className="py-2 pr-4 text-right">En curso</th>
+                        <th className="py-2 pr-4 text-right">Retirados sin aprobar</th>
+                        <th className="py-2 pr-4 text-right">% Aprobados</th>
+                        <th className="py-2 text-right">Avance promedio</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {aprobacionProg.map((a) => (
+                        <tr key={a.curso} className="border-b border-slate-100">
+                          <td className="py-2 pr-4">{a.curso}</td>
+                          <td className="py-2 pr-4 text-right">{a.cursaron}</td>
+                          <td className="py-2 pr-4 text-right">
+                            {a.aprobados_total ?? a.aprobados + a.aprobados_retirados}
+                          </td>
+                          <td className="py-2 pr-4 text-right">
+                            {(a.banda_0_25 ?? 0) + (a.banda_26_80 ?? 0)}
+                          </td>
+                          <td className="py-2 pr-4 text-right">{a.retirados}</td>
+                          <td className="py-2 pr-4 text-right font-medium">{a.pct_aprobados ?? '—'}%</td>
+                          <td className="py-2 text-right">{a.promedio ?? '—'}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-slate-400 mt-2">
+                  Aprobaron incluye a quienes superaron el 80% antes de retirarse. Fuente: panel de
+                  aprobación (definición canónica de la cohorte, sin perfiles de prueba ni retiros
+                  institucionales).
+                </p>
+              </Seccion>
+            </>
+          ) : distribucionEst.length > 0 ? (
+            <Seccion
+              titulo={`¿Cuántos cursos ha aprobado cada estudiante? — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
+              nota={`Distribución de los ${distribucionEst.reduce((s, d) => s + d.estudiantes, 0).toLocaleString('es-CO')} estudiantes activos por número de cursos aprobados (> 80%). Muestra cuántas personas van completas y cuántas rezagadas — no cuenta matrículas sino personas.`}
+            >
+              <GraficoBarras
+                datos={distribucionEst}
+                dataKey="estudiantes"
+                nombre="Estudiantes"
+                color={C.verde}
+                etiquetaKey="etiqueta"
+                rotarEtiquetas={false}
+              />
+              <p className="text-xs text-slate-400 mt-2">
+                Eje horizontal = número de cursos aprobados (de {distribucionEst.length - 1} en la
+                ruta {NOMBRE_PROGRAMA[programa]} {cohorte}). Un estudiante en el extremo alto ya
+                completó casi toda la ruta; los del extremo bajo son los que requieren
+                acompañamiento.
+              </p>
+            </Seccion>
+          ) : (
+            <p className="text-sm text-slate-400">Sin datos por estudiante para esta cohorte.</p>
+          )}
         </>
       )}
 
