@@ -219,6 +219,17 @@ export interface EmoflowPorCiudad {
   inactivos_30d: number;
 }
 
+// historial_emoflow: snapshot diario de los agregados nacionales de Emoflow (sin PII).
+// Serie de tiempo — arranca 2026-07-15, crece un punto por día con el sync diario.
+export interface HistorialEmoflow {
+  fecha: string;
+  participantes: number;
+  ingresos_promedio: number | string | null;
+  activos_7d: number;
+  inactivos_30d: number;
+  fuente: string;
+}
+
 export interface EmoflowBanda {
   banda: string;
   orden: number;
@@ -256,10 +267,11 @@ export interface Datos {
   emoflowPorCiudad: EmoflowPorCiudad[];
   emoflowBandas: EmoflowBanda[];
   emoflowBandasCiudad: EmoflowBandaCiudad[];
+  historialEmoflow: HistorialEmoflow[];
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -282,8 +294,9 @@ export async function cargarTodo(): Promise<Datos> {
       leer<EmoflowPorCiudad>('v_emoflow_por_ciudad?order=participantes.desc'),
       leer<EmoflowBanda>('v_emoflow_bandas?order=orden.asc'),
       leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad?order=orden.asc'),
+      leer<HistorialEmoflow>('historial_emoflow?order=fecha.asc'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {

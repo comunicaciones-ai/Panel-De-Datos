@@ -1062,6 +1062,25 @@ export default function Pagina() {
                   />
                 </Seccion>
               )}
+
+              {!ciudadElegida && datos.historialEmoflow.length > 0 && (
+                <Seccion
+                  titulo="Evolución de ingresos al sistema"
+                  nota={datos.historialEmoflow.length < 3
+                    ? `Serie nueva — arrancó el ${datos.historialEmoflow[0].fecha}, crece un punto por día con el sync automático. Con pocos días el gráfico se ve casi plano; se vuelve útil a medida que se acumulan semanas.`
+                    : 'Promedio nacional de ingresos al sistema (acumulado), un punto por día del sync automático.'}
+                >
+                  <GraficoHistorial
+                    historial={datos.historialEmoflow.map((h) => ({
+                      fecha: h.fecha,
+                      curso: 'Ingresos promedio',
+                      valor: h.ingresos_promedio != null ? Number(h.ingresos_promedio) : null,
+                    }))}
+                    metrica="ingresos_promedio"
+                    nombreMetrica="Ingresos promedio"
+                  />
+                </Seccion>
+              )}
             </>
           ) : (
             <Seccion titulo="Emoflow">
