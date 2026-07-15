@@ -249,6 +249,34 @@ export default function Pagina() {
     }));
   }, [datos]);
 
+  // % de participación Emoflow (Completado/Real) por ciudad — snapshot más reciente para la
+  // barra "hoy", serie completa para la evolución. Fuente: bloque EMOFLOW de Estadísticas.
+  const participacionUltima = useMemo(() => {
+    const filas = datos?.emoflowParticipacion ?? [];
+    if (filas.length === 0) return { fecha: null as string | null, semana: null as number | null, datos: [] };
+    const fechaMax = filas.reduce((m, f) => (f.fecha_corte > m ? f.fecha_corte : m), filas[0].fecha_corte);
+    const deHoy = filas.filter((f) => f.fecha_corte === fechaMax);
+    return {
+      fecha: fechaMax,
+      semana: deHoy[0]?.semana ?? null,
+      datos: [...deHoy]
+        .sort((a, b) => Number(b.avance_pct ?? 0) - Number(a.avance_pct ?? 0))
+        .map((f) => ({
+          etiqueta: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
+          avance_pct: Number(f.avance_pct ?? 0),
+        })),
+    };
+  }, [datos]);
+
+  const participacionEvolucion = useMemo(() => {
+    const filas = datos?.emoflowParticipacion ?? [];
+    return filas.map((f) => ({
+      fecha: f.fecha_corte,
+      curso: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
+      valor: f.avance_pct != null ? Number(f.avance_pct) : null,
+    }));
+  }, [datos]);
+
   // Aprobación canónica de la cohorte (cursaron = activos + retirados) por programa
   const aprobacionProg = useMemo(
     () =>
@@ -1078,6 +1106,40 @@ export default function Pagina() {
                     }))}
                     metrica="ingresos_promedio"
                     nombreMetrica="Ingresos promedio"
+                  />
+                </Seccion>
+              )}
+
+              {/* % de participación (Completado/Real de la semana en curso del formulario
+                  Emoflow) — distinto de "ingresos al sistema" arriba. Fuente: bloque EMOFLOW
+                  de la pestaña Estadísticas (BD Seguimiento de Monitorias), sync diario. */}
+              {!ciudadElegida && participacionUltima.datos.length > 0 && (
+                <Seccion
+                  titulo={`% de participación — Semana ${participacionUltima.semana ?? '—'}`}
+                  nota={`Completado / Real de la encuesta semanal Emoflow por ciudad (corte ${participacionUltima.fecha}). Distinto de "ingresos al sistema": aquí se mide si diligenciaron el formulario de esa semana.`}
+                >
+                  <GraficoBarras
+                    datos={participacionUltima.datos}
+                    dataKey="avance_pct"
+                    nombre="Participación %"
+                    color={C.azul3}
+                    dominioMax={100}
+                    rotarEtiquetas
+                  />
+                </Seccion>
+              )}
+
+              {!ciudadElegida && participacionEvolucion.length > 0 && (
+                <Seccion
+                  titulo="Evolución de la participación semanal"
+                  nota={participacionEvolucion.length < 18
+                    ? 'Serie nueva — arrancó el 2026-07-15, crece un punto por ciudad cada día con el sync automático. Se vuelve útil según se acumulan semanas.'
+                    : 'Participación % por ciudad, un punto por día del sync automático.'}
+                >
+                  <GraficoHistorial
+                    historial={participacionEvolucion}
+                    metrica="avance_pct"
+                    nombreMetrica="Participación %"
                   />
                 </Seccion>
               )}

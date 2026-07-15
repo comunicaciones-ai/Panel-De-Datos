@@ -230,6 +230,19 @@ export interface HistorialEmoflow {
   fuente: string;
 }
 
+// emoflow_participacion_semanal: % de participación (Completado/Real) por ciudad, del bloque
+// EMOFLOW de la pestaña Estadísticas (BD Seguimiento de Monitorias). Snapshot diario — arranca
+// 2026-07-15; el mismo número de semana se re-lee varios días para capturar el avance intra-semana.
+export interface EmoflowParticipacionSemanal {
+  fecha_corte: string;
+  semana: number;
+  grupo_ciudad: string;
+  seleccionados: number | null;
+  real: number | null;
+  completado: number | null;
+  avance_pct: number | string | null;
+}
+
 export interface EmoflowBanda {
   banda: string;
   orden: number;
@@ -268,10 +281,11 @@ export interface Datos {
   emoflowBandas: EmoflowBanda[];
   emoflowBandasCiudad: EmoflowBandaCiudad[];
   historialEmoflow: HistorialEmoflow[];
+  emoflowParticipacion: EmoflowParticipacionSemanal[];
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -295,8 +309,9 @@ export async function cargarTodo(): Promise<Datos> {
       leer<EmoflowBanda>('v_emoflow_bandas?order=orden.asc'),
       leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad?order=orden.asc'),
       leer<HistorialEmoflow>('historial_emoflow?order=fecha.asc'),
+      leer<EmoflowParticipacionSemanal>('emoflow_participacion_semanal?order=fecha_corte.asc'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {
