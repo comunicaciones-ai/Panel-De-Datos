@@ -261,55 +261,37 @@ export default function Pagina() {
     }));
   }, [datos]);
 
-  // % de participación Emoflow por ciudad, de la ÚLTIMA SEMANA INICIADA. Se ancla al mayor
-  // número de semana con datos (auto-avanza a 17, 18… cuando el sync trae la semana nueva) y,
-  // por ciudad, toma su corte más reciente dentro de esa semana — así todas aparecen aunque
-  // hayan reportado en días distintos. Fuente: seguimiento semanal de monitorías.
-  const participacionUltima = useMemo(() => {
-    const filas = datos?.emoflowParticipacion ?? [];
-    if (filas.length === 0) return { fecha: null as string | null, semana: null as number | null, datos: [] };
-    const semanaMax = filas.reduce((m, f) => Math.max(m, f.semana), 0);
-    const deSemana = filas.filter((f) => f.semana === semanaMax);
-    const ultimoPorCiudad = new Map<string, (typeof filas)[number]>();
-    let fechaMax = deSemana[0].fecha_corte;
-    for (const f of deSemana) {
-      if (f.fecha_corte > fechaMax) fechaMax = f.fecha_corte;
-      const prev = ultimoPorCiudad.get(f.grupo_ciudad);
-      if (!prev || f.fecha_corte > prev.fecha_corte) ultimoPorCiudad.set(f.grupo_ciudad, f);
-    }
-    return {
-      fecha: fechaMax,
-      semana: semanaMax,
-      datos: Array.from(ultimoPorCiudad.values())
-        .sort((a, b) => Number(b.avance_pct ?? 0) - Number(a.avance_pct ?? 0))
-        .map((f) => ({
-          etiqueta: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
-          avance_pct: Number(f.avance_pct ?? 0),
-        })),
-    };
+  // Evolución semanal de la actividad en Emoflow (% de la matrícula activa por semana), por
+  // ciudad. Directo del CSV de Emoflow (tabla emoflow_actividad_semanal). Eje X = lunes de cada
+  // semana (ISO) → orden temporal correcto. Excluye NACIONAL (se muestran las líneas por ciudad).
+  const actividadSemanalEvolucion = useMemo(() => {
+    const filas = (datos?.emoflowActividadSemanal ?? []).filter((f) => f.grupo_ciudad !== 'NACIONAL');
+    return [...filas]
+      .sort((a, b) => a.semana_inicio.localeCompare(b.semana_inicio))
+      .map((f) => ({
+        fecha: f.semana_inicio,
+        curso: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
+        valor: Number(f.pct_activos ?? 0),
+      }));
   }, [datos]);
 
-  // La evolución grafica el CONTEO de check-ins (completado), no el %. El % pasado no es
-  // reconstruible: el denominador (Real) de cada semana no existe en ninguna fuente, y usar el
-  // Real actual daría >100% en ciudades cuya cohorte encogió. El conteo es fiel (validado contra
-  // Estadísticas para la Semana 16) y arranca en la Semana 1 gracias al backfill de la hoja cruda.
-  const participacionEvolucion = useMemo(() => {
-    const filas = datos?.emoflowParticipacion ?? [];
-    // Por (ciudad, semana) nos quedamos con el corte MÁS RECIENTE = el % de cierre de esa
-    // semana. Así el gráfico es semanal (una marca por semana), no por cada snapshot diario.
-    const ultimo = new Map<string, (typeof filas)[number]>();
-    for (const f of filas) {
-      const k = `${f.grupo_ciudad}|${f.semana}`;
-      const prev = ultimo.get(k);
-      if (!prev || f.fecha_corte > prev.fecha_corte) ultimo.set(k, f);
-    }
-    return Array.from(ultimo.values())
-      .sort((a, b) => a.semana - b.semana)
-      .map((f) => ({
-        fecha: `Sem ${f.semana}`,
-        curso: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
-        valor: f.avance_pct != null ? Number(f.avance_pct) : null,
-      }));
+  // Snapshot de la ÚLTIMA SEMANA COMPLETA por ciudad (evita la semana en curso, que sale baja por
+  // estar empezando). Auto-avanza solo con los datos nuevos del sync.
+  const actividadSemanalUltima = useMemo(() => {
+    const filas = (datos?.emoflowActividadSemanal ?? []).filter((f) => f.grupo_ciudad !== 'NACIONAL');
+    if (filas.length === 0) return { semana: null as string | null, datos: [] };
+    const semanas = Array.from(new Set(filas.map((f) => f.semana_inicio))).sort();
+    const semanaSnap = semanas.length >= 2 ? semanas[semanas.length - 2] : semanas[semanas.length - 1];
+    return {
+      semana: semanaSnap,
+      datos: filas
+        .filter((f) => f.semana_inicio === semanaSnap)
+        .sort((a, b) => Number(b.pct_activos ?? 0) - Number(a.pct_activos ?? 0))
+        .map((f) => ({
+          etiqueta: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
+          pct_activos: Number(f.pct_activos ?? 0),
+        })),
+    };
   }, [datos]);
 
   // ── Emoflow: bloques (solo datos propios de Emoflow, no de Q10) ────────────
@@ -1151,9 +1133,9 @@ export default function Pagina() {
                   detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} sin entrar +30 días`}
                 />
                 <Kpi
-                  titulo="Participar → aprobar"
+                  titulo="Usar Emoflow → aprobar (Q10)"
                   valor={correlacion ? `${correlacion.max.toFixed(0)}%` : '—'}
-                  detalle={correlacion ? `vs ${correlacion.min.toFixed(0)}% de los que menos entran` : 'aprobación de quienes más entran'}
+                  detalle={correlacion ? `vs ${correlacion.min.toFixed(0)}% de los que menos entran` : 'aprobación (Q10) de quienes más entran'}
                 />
               </div>
 
@@ -1172,20 +1154,20 @@ export default function Pagina() {
                 </Seccion>
 
                 <Seccion
-                  titulo="¿El que más entra, aprende más?"
-                  nota="% de aprobación según cuánto usa el sistema.">
+                  titulo="¿El que más entra a Emoflow, aprueba más? (cruce con Q10)"
+                  nota="Cruce: uso de Emoflow (eje de bandas) vs % de aprobación de los cursos, que viene de Q10 — no de Emoflow.">
                   <GraficoBarras
                     datos={emoflowBandas}
                     dataKey="pct_aprobacion"
-                    nombre="Aprobación %"
+                    nombre="Aprobación % (Q10)"
                     color={C.verde}
                     dominioMax={100}
                   />
                   {correlacion && (
                     <p className="text-xs text-slate-500 mt-2">
-                      <b>Sí, y es medible:</b> quienes menos entran aprueban ~{correlacion.min.toFixed(0)}% y
-                      quienes más entran ~{correlacion.max.toFixed(0)}%. Entrar seguido es señal temprana de
-                      que el estudiante va bien — sirve para detectar a tiempo a quien se está quedando.
+                      <b>Sí, y es medible:</b> quienes menos entran a Emoflow aprueban ~{correlacion.min.toFixed(0)}% y
+                      quienes más entran ~{correlacion.max.toFixed(0)}% (aprobación de Q10). Usar Emoflow es señal
+                      temprana de que el estudiante va bien — sirve para detectar a tiempo a quien se está quedando.
                     </p>
                   )}
                 </Seccion>
@@ -1218,16 +1200,16 @@ export default function Pagina() {
                 </Seccion>
               )}
 
-              {/* % de participación semanal (formulario Emoflow) — real, se mantiene */}
-              {!ciudadElegida && participacionUltima.datos.length > 0 && (
+              {/* % de matrícula activa por ciudad — última semana COMPLETA. Directo de Emoflow. */}
+              {!ciudadElegida && actividadSemanalUltima.datos.length > 0 && (
                 <Seccion
-                  titulo={`% de participación — Semana ${participacionUltima.semana ?? '—'}`}
-                  nota={`Completado / Real de la encuesta semanal Emoflow por ciudad (corte ${participacionUltima.fecha}). Mide si diligenciaron el formulario de esa semana — distinto de "entrar al sistema".`}
+                  titulo={`% de matrícula activa — semana del ${actividadSemanalUltima.semana ?? '—'}`}
+                  nota="Personas distintas que entraron a Emoflow esa semana ÷ matrícula Emoflow de la ciudad. Última semana completa (la semana en curso se excluye por estar empezando). Directo del CSV de Emoflow."
                 >
                   <GraficoBarras
-                    datos={participacionUltima.datos}
-                    dataKey="avance_pct"
-                    nombre="Participación %"
+                    datos={actividadSemanalUltima.datos}
+                    dataKey="pct_activos"
+                    nombre="% activos"
                     color={C.azul3}
                     dominioMax={100}
                     rotarEtiquetas
@@ -1235,15 +1217,15 @@ export default function Pagina() {
                 </Seccion>
               )}
 
-              {!ciudadElegida && participacionEvolucion.length > 0 && (
+              {!ciudadElegida && actividadSemanalEvolucion.length > 0 && (
                 <Seccion
-                  titulo="Evolución semanal de la participación"
-                  nota='% de diligenciamiento del formulario semanal por ciudad — una marca por semana (el valor de cierre de cada una). La última semana está en curso, por eso aparece más baja. Fuente: seguimiento semanal de monitorías, no el API de Emoflow.'
+                  titulo="Evolución semanal de la actividad en Emoflow"
+                  nota="% de la matrícula Emoflow activa por semana, por ciudad. Una marca por semana (eje X = lunes de cada semana). La última semana aparece baja por estar en curso. Directo del CSV de Emoflow."
                 >
                   <GraficoHistorial
-                    historial={participacionEvolucion}
-                    metrica="avance_pct"
-                    nombreMetrica="Participación %"
+                    historial={actividadSemanalEvolucion}
+                    metrica="pct_activos"
+                    nombreMetrica="% activos"
                   />
                 </Seccion>
               )}
