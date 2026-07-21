@@ -199,7 +199,7 @@ export function GraficoHistorial({
         <XAxis
           dataKey="fecha"
           tick={{ fontSize: 11 }}
-          tickFormatter={(f: string) => f.slice(5)}
+          tickFormatter={(f: string) => (/^\d{4}-\d{2}-\d{2}/.test(f) ? f.slice(5) : f)}
         />
         <YAxis tick={{ fontSize: 12 }} />
         <Tooltip />

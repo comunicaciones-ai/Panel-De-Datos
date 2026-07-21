@@ -50,6 +50,18 @@ const COLOR_SITUACION: Record<string, string> = {
   no_interesado: C.naranja,
 };
 
+const MESES_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+// "2026-07-20" → "20 de julio". Para el encabezado del resumen del día.
+function fechaCortaEs(iso?: string | null): string | null {
+  if (!iso) return null;
+  const [, m, d] = iso.split('-').map(Number);
+  if (!m || !d) return null;
+  return `${d} de ${MESES_ES[m - 1]}`;
+}
+
 function Kpi({ titulo, valor, detalle }: { titulo: string; valor: string; detalle?: string }) {
   return (
     <motion.div
@@ -249,17 +261,26 @@ export default function Pagina() {
     }));
   }, [datos]);
 
-  // % de participación Emoflow (Completado/Real) por ciudad — snapshot más reciente para la
-  // barra "hoy", serie completa para la evolución. Fuente: bloque EMOFLOW de Estadísticas.
+  // % de participación Emoflow por ciudad, de la ÚLTIMA SEMANA INICIADA. Se ancla al mayor
+  // número de semana con datos (auto-avanza a 17, 18… cuando el sync trae la semana nueva) y,
+  // por ciudad, toma su corte más reciente dentro de esa semana — así todas aparecen aunque
+  // hayan reportado en días distintos. Fuente: seguimiento semanal de monitorías.
   const participacionUltima = useMemo(() => {
     const filas = datos?.emoflowParticipacion ?? [];
     if (filas.length === 0) return { fecha: null as string | null, semana: null as number | null, datos: [] };
-    const fechaMax = filas.reduce((m, f) => (f.fecha_corte > m ? f.fecha_corte : m), filas[0].fecha_corte);
-    const deHoy = filas.filter((f) => f.fecha_corte === fechaMax);
+    const semanaMax = filas.reduce((m, f) => Math.max(m, f.semana), 0);
+    const deSemana = filas.filter((f) => f.semana === semanaMax);
+    const ultimoPorCiudad = new Map<string, (typeof filas)[number]>();
+    let fechaMax = deSemana[0].fecha_corte;
+    for (const f of deSemana) {
+      if (f.fecha_corte > fechaMax) fechaMax = f.fecha_corte;
+      const prev = ultimoPorCiudad.get(f.grupo_ciudad);
+      if (!prev || f.fecha_corte > prev.fecha_corte) ultimoPorCiudad.set(f.grupo_ciudad, f);
+    }
     return {
       fecha: fechaMax,
-      semana: deHoy[0]?.semana ?? null,
-      datos: [...deHoy]
+      semana: semanaMax,
+      datos: Array.from(ultimoPorCiudad.values())
         .sort((a, b) => Number(b.avance_pct ?? 0) - Number(a.avance_pct ?? 0))
         .map((f) => ({
           etiqueta: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
@@ -274,12 +295,75 @@ export default function Pagina() {
   // Estadísticas para la Semana 16) y arranca en la Semana 1 gracias al backfill de la hoja cruda.
   const participacionEvolucion = useMemo(() => {
     const filas = datos?.emoflowParticipacion ?? [];
-    return filas.map((f) => ({
-      fecha: f.fecha_corte,
-      curso: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
-      valor: f.completado != null ? Number(f.completado) : null,
-    }));
+    // Por (ciudad, semana) nos quedamos con el corte MÁS RECIENTE = el % de cierre de esa
+    // semana. Así el gráfico es semanal (una marca por semana), no por cada snapshot diario.
+    const ultimo = new Map<string, (typeof filas)[number]>();
+    for (const f of filas) {
+      const k = `${f.grupo_ciudad}|${f.semana}`;
+      const prev = ultimo.get(k);
+      if (!prev || f.fecha_corte > prev.fecha_corte) ultimo.set(k, f);
+    }
+    return Array.from(ultimo.values())
+      .sort((a, b) => a.semana - b.semana)
+      .map((f) => ({
+        fecha: `Sem ${f.semana}`,
+        curso: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
+        valor: f.avance_pct != null ? Number(f.avance_pct) : null,
+      }));
   }, [datos]);
+
+  // ── Emoflow: bloques (solo datos propios de Emoflow, no de Q10) ────────────
+  // Correlación uso→aprendizaje: rango de % de aprobación entre la banda que menos
+  // entra y la que más. City-aware porque emoflowBandas ya respeta la ciudad.
+  const correlacion = useMemo(() => {
+    const aprob = emoflowBandas.map((b) => b.pct_aprobacion).filter((v) => v > 0);
+    if (aprob.length < 2) return null;
+    return { min: Math.min(...aprob), max: Math.max(...aprob) };
+  }, [emoflowBandas]);
+
+  // Serie DIARIA REAL de ingresos (reemplaza el backfill plano). Sin ciudad → NACIONAL;
+  // con ciudad elegida → esa ciudad. Dos líneas: ingresos y usuarios activos.
+  const evolucionDiaria = useMemo(() => {
+    const grupo = ciudadElegida ?? 'NACIONAL';
+    const filas = (datos?.emoflowDiario ?? []).filter((f) => f.grupo_ciudad === grupo);
+    const out: { fecha: string; curso: string; valor: number | null }[] = [];
+    for (const f of filas) {
+      out.push({ fecha: f.fecha, curso: 'Ingresos', valor: f.ingresos });
+      out.push({ fecha: f.fecha, curso: 'Usuarios activos', valor: f.usuarios_activos });
+    }
+    return out;
+  }, [datos, ciudadElegida]);
+
+  // Último día registrado (para el resumen en palabras).
+  const ultimoDiaEmoflow = useMemo(() => {
+    const grupo = ciudadElegida ?? 'NACIONAL';
+    const filas = (datos?.emoflowDiario ?? []).filter((f) => f.grupo_ciudad === grupo);
+    if (filas.length === 0) return null;
+    return filas.reduce((a, b) => (a.fecha > b.fecha ? a : b));
+  }, [datos, ciudadElegida]);
+
+  // Resumen en palabras: el equivalente automático del reporte diario de WhatsApp.
+  const narrativaEmoflow = useMemo(() => {
+    if (!emoflowKpis) return null;
+    const partes: string[] = [];
+    const pctAct = emoflowKpis.participantes
+      ? Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)
+      : 0;
+    const donde = ciudadElegida ? ` en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : '';
+    partes.push(
+      `${emoflowKpis.activos7.toLocaleString('es-CO')} de ${emoflowKpis.participantes.toLocaleString('es-CO')} estudiantes${donde} entraron al sistema en los últimos 7 días (${pctAct}%).`,
+    );
+    if (ultimoDiaEmoflow) {
+      const f = fechaCortaEs(ultimoDiaEmoflow.fecha);
+      partes.push(
+        `El último día registrado${f ? ` (${f})` : ''} hubo ${ultimoDiaEmoflow.ingresos.toLocaleString('es-CO')} ingresos de ${ultimoDiaEmoflow.usuarios_activos.toLocaleString('es-CO')} estudiantes.`,
+      );
+    }
+    if (emoflowKpis.inactivos30 > 0) {
+      partes.push(`${emoflowKpis.inactivos30.toLocaleString('es-CO')} llevan más de 30 días sin entrar — el grupo a vigilar.`);
+    }
+    return partes.join(' ');
+  }, [emoflowKpis, ciudadElegida, ultimoDiaEmoflow]);
 
   // Aprobación canónica de la cohorte (cursaron = activos + retirados) por programa
   const aprobacionProg = useMemo(
@@ -1031,33 +1115,54 @@ export default function Pagina() {
         <>
           {emoflowKpis ? (
             <>
+              {/* Resumen en palabras — el reporte diario, generado solo */}
+              {narrativaEmoflow && (
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5 }}
+                  className="tarjeta-glass p-4 mb-5 border-l-4 border-rofe-azul"
+                >
+                  <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">
+                    Resumen de hoy
+                    {fechaCortaEs(datos.emoflowResumen?.[0]?.fecha_corte)
+                      ? ` · ${fechaCortaEs(datos.emoflowResumen[0].fecha_corte)}`
+                      : ''}
+                  </p>
+                  <p className="text-sm md:text-base text-slate-700 leading-relaxed">{narrativaEmoflow}</p>
+                </motion.div>
+              )}
+
+              {/* KPIs con significado, no plomería */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <Kpi
                   titulo={ciudadElegida ? `Estudiantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : 'Estudiantes con Emoflow'}
                   valor={emoflowKpis.participantes.toLocaleString('es-CO')}
-                  detalle={ciudadElegida ? undefined : 'de 777 activos (97%)'}
+                  detalle={ciudadElegida ? undefined : `${(datos.emoflowResumen?.[0]?.con_match_supabase ?? 0).toLocaleString('es-CO')} cruzan con nuestra cohorte`}
                 />
                 <Kpi
-                  titulo="Ingresos promedio"
-                  valor={emoflowKpis.promedio.toFixed(1)}
-                  detalle={`mediana ${emoflowKpis.mediana}`}
-                />
-                <Kpi
-                  titulo="Activos últimos 7 días"
+                  titulo="Activos (últimos 7 días)"
                   valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)}%` : '—'}
                   detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} estudiantes`}
                 />
                 <Kpi
-                  titulo="Sin entrar hace +30 días"
+                  titulo="En riesgo de abandono"
                   valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.inactivos30 / emoflowKpis.participantes) * 100)}%` : '—'}
-                  detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} estudiantes`}
+                  detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} sin entrar +30 días`}
+                />
+                <Kpi
+                  titulo="Participar → aprobar"
+                  valor={correlacion ? `${correlacion.max.toFixed(0)}%` : '—'}
+                  detalle={correlacion ? `vs ${correlacion.min.toFixed(0)}% de los que menos entran` : 'aprobación de quienes más entran'}
                 />
               </div>
 
+              {/* Insight elevado: participar → aprender */}
               <div className="grid md:grid-cols-2 gap-6">
                 <Seccion
                   titulo="Distribución de uso"
-                  nota="Ingresos = veces que el estudiante entró al sistema (acumulado). Cubre 757 de los 777 activos (97%).">
+                  nota={`Cuántas veces entró cada estudiante al sistema (acumulado). Cubre ${emoflowBandas.reduce((s, b) => s + b.participantes, 0).toLocaleString('es-CO')} estudiantes con actividad.`}
+                >
                   <GraficoBarras
                     datos={emoflowBandas}
                     dataKey="participantes"
@@ -1067,8 +1172,8 @@ export default function Pagina() {
                 </Seccion>
 
                 <Seccion
-                  titulo="¿El que más entra, aprueba más?"
-                  nota="% de aprobación de cada banda de uso.">
+                  titulo="¿El que más entra, aprende más?"
+                  nota="% de aprobación según cuánto usa el sistema.">
                   <GraficoBarras
                     datos={emoflowBandas}
                     dataKey="pct_aprobacion"
@@ -1076,10 +1181,13 @@ export default function Pagina() {
                     color={C.verde}
                     dominioMax={100}
                   />
-                  <p className="text-xs text-slate-400 mt-2">
-                    La relación es real pero suave: quienes menos entran aprueban ~82% y quienes más
-                    entran ~88%. Sirve para detectar el extremo bajo, no como predictor fino.
-                  </p>
+                  {correlacion && (
+                    <p className="text-xs text-slate-500 mt-2">
+                      <b>Sí, y es medible:</b> quienes menos entran aprueban ~{correlacion.min.toFixed(0)}% y
+                      quienes más entran ~{correlacion.max.toFixed(0)}%. Entrar seguido es señal temprana de
+                      que el estudiante va bien — sirve para detectar a tiempo a quien se está quedando.
+                    </p>
+                  )}
                 </Seccion>
               </div>
 
@@ -1095,32 +1203,26 @@ export default function Pagina() {
                 </Seccion>
               )}
 
-              {!ciudadElegida && datos.historialEmoflow.length > 0 && (
+              {/* Evolución diaria REAL de ingresos — nacional o de la ciudad elegida */}
+              {evolucionDiaria.length > 0 && (
                 <Seccion
-                  titulo="Evolución de ingresos al sistema"
-                  nota={datos.historialEmoflow.length < 3
-                    ? `Serie nueva — arrancó el ${datos.historialEmoflow[0].fecha}, crece un punto por día con el sync automático. Con pocos días el gráfico se ve casi plano; se vuelve útil a medida que se acumulan semanas.`
-                    : 'Promedio nacional de ingresos al sistema (acumulado), un punto por día del sync automático.'}
-                >
+                  titulo={ciudadElegida
+                    ? `Evolución de ingresos — ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}`
+                    : 'Evolución de ingresos al sistema'}
+                  nota="Usuarios activos = personas distintas que entraron ese día. Ingresos = total de registros de emoción (una persona genera varios en un día). Serie real desde los timestamps de Emoflow — arranca el 18 de marzo.">
                   <GraficoHistorial
-                    historial={datos.historialEmoflow.map((h) => ({
-                      fecha: h.fecha,
-                      curso: 'Ingresos promedio',
-                      valor: h.ingresos_promedio != null ? Number(h.ingresos_promedio) : null,
-                    }))}
-                    metrica="ingresos_promedio"
-                    nombreMetrica="Ingresos promedio"
+                    historial={evolucionDiaria}
+                    metrica="ingresos"
+                    nombreMetrica="Ingresos"
                   />
                 </Seccion>
               )}
 
-              {/* % de participación (Completado/Real de la semana en curso del formulario
-                  Emoflow) — distinto de "ingresos al sistema" arriba. Fuente: bloque EMOFLOW
-                  de la pestaña Estadísticas (BD Seguimiento de Monitorias), sync diario. */}
+              {/* % de participación semanal (formulario Emoflow) — real, se mantiene */}
               {!ciudadElegida && participacionUltima.datos.length > 0 && (
                 <Seccion
                   titulo={`% de participación — Semana ${participacionUltima.semana ?? '—'}`}
-                  nota={`Completado / Real de la encuesta semanal Emoflow por ciudad (corte ${participacionUltima.fecha}). Distinto de "ingresos al sistema": aquí se mide si diligenciaron el formulario de esa semana.`}
+                  nota={`Completado / Real de la encuesta semanal Emoflow por ciudad (corte ${participacionUltima.fecha}). Mide si diligenciaron el formulario de esa semana — distinto de "entrar al sistema".`}
                 >
                   <GraficoBarras
                     datos={participacionUltima.datos}
@@ -1135,13 +1237,13 @@ export default function Pagina() {
 
               {!ciudadElegida && participacionEvolucion.length > 0 && (
                 <Seccion
-                  titulo="Evolución de la participación semanal"
-                  nota='Check-ins registrados por ciudad y semana (Semana 1 en adelante). La última semana es la que está en curso, por eso aparece más baja. Fuente: registro semanal Emoflow.'
+                  titulo="Evolución semanal de la participación"
+                  nota='% de diligenciamiento del formulario semanal por ciudad — una marca por semana (el valor de cierre de cada una). La última semana está en curso, por eso aparece más baja. Fuente: seguimiento semanal de monitorías, no el API de Emoflow.'
                 >
                   <GraficoHistorial
                     historial={participacionEvolucion}
-                    metrica="completado"
-                    nombreMetrica="Check-ins"
+                    metrica="avance_pct"
+                    nombreMetrica="Participación %"
                   />
                 </Seccion>
               )}
