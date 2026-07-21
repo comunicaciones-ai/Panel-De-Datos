@@ -243,6 +243,26 @@ export interface EmoflowParticipacionSemanal {
   avance_pct: number | string | null;
 }
 
+// emoflow_ingresos_agregados_4h: snapshots agregados cada 4 horas (NUEVO 2026-07-20)
+// Reemplaza snapshots diarios redundantes con métricas reales: % participación, velocidad
+// de ingresos, distribución. Serie de tiempo — arranca 2026-07-20, crece 6 puntos por día.
+export interface EmoflowAgregados4h {
+  fecha: string;
+  hora_snapshot: string;
+  grupo_ciudad: string;
+  pct_participacion_emociones: number | string | null;
+  pct_participacion_bienestar: number | string | null;
+  nuevos_ingresos_4h: number;
+  velocidad_ingresos_4h: number | string | null;
+  pct_sin_ingresos: number | string | null;
+  pct_rango_1_5: number | string | null;
+  pct_rango_6_15: number | string | null;
+  pct_rango_16_30: number | string | null;
+  pct_rango_31_60: number | string | null;
+  pct_rango_61plus: number | string | null;
+  fuente: string;
+}
+
 export interface EmoflowBanda {
   banda: string;
   orden: number;
@@ -282,10 +302,11 @@ export interface Datos {
   emoflowBandasCiudad: EmoflowBandaCiudad[];
   historialEmoflow: HistorialEmoflow[];
   emoflowParticipacion: EmoflowParticipacionSemanal[];
+  emoflowAgregados4h: EmoflowAgregados4h[];
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, emoflowAgregados4h] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -310,8 +331,9 @@ export async function cargarTodo(): Promise<Datos> {
       leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad?order=orden.asc'),
       leer<HistorialEmoflow>('historial_emoflow?order=fecha.asc'),
       leer<EmoflowParticipacionSemanal>('emoflow_participacion_semanal?order=fecha_corte.asc'),
+      leer<EmoflowAgregados4h>('emoflow_ingresos_agregados_4h?order=hora_snapshot.asc'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, emoflowAgregados4h };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {
