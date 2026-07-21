@@ -264,8 +264,23 @@ export default function Pagina() {
   // Evolución semanal de la actividad en Emoflow (% de la matrícula activa por semana), por
   // ciudad. Directo del CSV de Emoflow (tabla emoflow_actividad_semanal). Eje X = lunes de cada
   // semana (ISO) → orden temporal correcto. Excluye NACIONAL (se muestran las líneas por ciudad).
+  // Una semana (lunes ISO) está COMPLETA si su domingo (lunes+6) ya pasó, según la última fecha
+  // con datos. Así excluimos la semana en curso, que aparecería artificialmente baja por llevar
+  // pocos días — no es un bajón real, es que aún no termina.
+  const semanaCompleta = useMemo(() => {
+    const maxData = (datos?.emoflowDiario ?? []).reduce((m, f) => (f.fecha > m ? f.fecha : m), '');
+    return (lunes: string) => {
+      if (!maxData) return true;
+      const dom = new Date(`${lunes}T00:00:00Z`);
+      dom.setUTCDate(dom.getUTCDate() + 6);
+      return dom.toISOString().slice(0, 10) <= maxData;
+    };
+  }, [datos]);
+
   const actividadSemanalEvolucion = useMemo(() => {
-    const filas = (datos?.emoflowActividadSemanal ?? []).filter((f) => f.grupo_ciudad !== 'NACIONAL');
+    const filas = (datos?.emoflowActividadSemanal ?? []).filter(
+      (f) => f.grupo_ciudad !== 'NACIONAL' && semanaCompleta(f.semana_inicio),
+    );
     return [...filas]
       .sort((a, b) => a.semana_inicio.localeCompare(b.semana_inicio))
       .map((f) => ({
@@ -273,15 +288,15 @@ export default function Pagina() {
         curso: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
         valor: Number(f.pct_activos ?? 0),
       }));
-  }, [datos]);
+  }, [datos, semanaCompleta]);
 
-  // Snapshot de la ÚLTIMA SEMANA COMPLETA por ciudad (evita la semana en curso, que sale baja por
-  // estar empezando). Auto-avanza solo con los datos nuevos del sync.
+  // Snapshot de la ÚLTIMA SEMANA COMPLETA por ciudad (excluye la semana en curso).
   const actividadSemanalUltima = useMemo(() => {
-    const filas = (datos?.emoflowActividadSemanal ?? []).filter((f) => f.grupo_ciudad !== 'NACIONAL');
+    const filas = (datos?.emoflowActividadSemanal ?? []).filter(
+      (f) => f.grupo_ciudad !== 'NACIONAL' && semanaCompleta(f.semana_inicio),
+    );
     if (filas.length === 0) return { semana: null as string | null, datos: [] };
-    const semanas = Array.from(new Set(filas.map((f) => f.semana_inicio))).sort();
-    const semanaSnap = semanas.length >= 2 ? semanas[semanas.length - 2] : semanas[semanas.length - 1];
+    const semanaSnap = filas.reduce((m, f) => (f.semana_inicio > m ? f.semana_inicio : m), filas[0].semana_inicio);
     return {
       semana: semanaSnap,
       datos: filas
@@ -292,7 +307,7 @@ export default function Pagina() {
           pct_activos: Number(f.pct_activos ?? 0),
         })),
     };
-  }, [datos]);
+  }, [datos, semanaCompleta]);
 
   // ── Emoflow: bloques (solo datos propios de Emoflow, no de Q10) ────────────
   // Correlación uso→aprendizaje: rango de % de aprobación entre la banda que menos
@@ -1220,7 +1235,7 @@ export default function Pagina() {
               {!ciudadElegida && actividadSemanalEvolucion.length > 0 && (
                 <Seccion
                   titulo="Evolución semanal de la actividad en Emoflow"
-                  nota="% de la matrícula Emoflow activa por semana, por ciudad. Una marca por semana (eje X = lunes de cada semana). La última semana aparece baja por estar en curso. Directo del CSV de Emoflow."
+                  nota="% de la matrícula Emoflow activa por semana, por ciudad. Una marca por semana completa (eje X = lunes de cada semana). La semana en curso se muestra solo cuando termina, para no comparar días sueltos contra semanas completas. Directo del CSV de Emoflow."
                 >
                   <GraficoHistorial
                     historial={actividadSemanalEvolucion}
