@@ -123,6 +123,11 @@ export default function Pagina() {
   const [tab, setTab] = useState<Tab>('Resumen');
   // Unidad del desglose "Estado de la cohorte": matrículas (inscripciones) o estudiantes (personas)
   const [unidadEstado, setUnidadEstado] = useState<'matriculas' | 'estudiantes'>('matriculas');
+  // Alcance del bloque Emoflow. 'canonico' (default) = solo estudiantes vigentes según la
+  // pestaña Seguimiento (742) — coherente con el resto del panel. 'todos' = universo
+  // histórico completo del CSV de Emoflow (827): incluye 17 en retiro probable y 68 que
+  // nunca fueron matriculados en Supabase (postulantes / retirados antiguos).
+  const [alcanceEmoflow, setAlcanceEmoflow] = useState<'canonico' | 'todos'>('canonico');
 
   useEffect(() => {
     cargarTodo().then(setDatos).catch((e) => setError(String(e)));
@@ -213,8 +218,10 @@ export default function Pagina() {
   // esa ciudad. Mismo patrón "nacional vs *PorCiudad" del resto del panel.
   const emoflowKpis = useMemo(() => {
     if (!datos) return null;
+    const canon = alcanceEmoflow === 'canonico';
     if (ciudadElegida) {
-      const c = datos.emoflowPorCiudad?.find((e) => e.grupo_ciudad === ciudadElegida);
+      const fuente = canon ? datos.emoflowPorCiudadCanonico : datos.emoflowPorCiudad;
+      const c = fuente?.find((e) => e.grupo_ciudad === ciudadElegida);
       if (!c) return null;
       return {
         participantes: c.participantes,
@@ -224,7 +231,7 @@ export default function Pagina() {
         inactivos30: c.inactivos_30d,
       };
     }
-    const r = datos.emoflowResumen?.[0];
+    const r = (canon ? datos.emoflowResumenCanonico : datos.emoflowResumen)?.[0];
     if (!r) return null;
     return {
       participantes: r.participantes,
@@ -233,15 +240,18 @@ export default function Pagina() {
       activos7: r.activos_7d,
       inactivos30: r.inactivos_30d,
     };
-  }, [datos, ciudadElegida]);
+  }, [datos, ciudadElegida, alcanceEmoflow]);
 
   // Emoflow — bandas de uso. Con ciudad elegida hay que usar la vista desglosada: mostrar las
   // bandas nacionales dentro de una vista de ciudad sería mezclar universos.
   const emoflowBandas = useMemo(() => {
     if (!datos) return [];
+    const canon = alcanceEmoflow === 'canonico';
     const filas = ciudadElegida
-      ? (datos.emoflowBandasCiudad ?? []).filter((b) => b.grupo_ciudad === ciudadElegida)
-      : (datos.emoflowBandas ?? []);
+      ? ((canon ? datos.emoflowBandasCiudadCanonico : datos.emoflowBandasCiudad) ?? []).filter(
+          (b) => b.grupo_ciudad === ciudadElegida,
+        )
+      : ((canon ? datos.emoflowBandasCanonico : datos.emoflowBandas) ?? []);
     return [...filas]
       .sort((a, b) => a.orden - b.orden)
       .map((b) => ({
@@ -249,17 +259,19 @@ export default function Pagina() {
         participantes: b.participantes,
         pct_aprobacion: Number(b.pct_aprobacion ?? 0),
       }));
-  }, [datos, ciudadElegida]);
+  }, [datos, ciudadElegida, alcanceEmoflow]);
 
   // Uso por ciudad — solo tiene sentido en la vista nacional (con una ciudad elegida sería
   // una sola barra).
   const emoflowCiudades = useMemo(() => {
     if (!datos) return [];
-    return (datos.emoflowPorCiudad ?? []).map((c) => ({
+    const fuente =
+      alcanceEmoflow === 'canonico' ? datos.emoflowPorCiudadCanonico : datos.emoflowPorCiudad;
+    return (fuente ?? []).map((c) => ({
       etiqueta: ETIQUETA_GRUPO[c.grupo_ciudad] ?? c.grupo_ciudad,
       ingresos_promedio: Number(c.ingresos_promedio ?? 0),
     }));
-  }, [datos]);
+  }, [datos, alcanceEmoflow]);
 
   // Evolución semanal de la actividad en Emoflow (% de la matrícula activa por semana), por
   // ciudad. Directo del CSV de Emoflow (tabla emoflow_actividad_semanal). Eje X = lunes de cada
@@ -855,11 +867,17 @@ export default function Pagina() {
           {/* Verificación cruzada oficial vs. ajustado (v_aprobacion_cursos_jc_ajustado). Si el
               sync automático de aprobacion_cursos se atrasa (como pasó el 2026-07-23), la
               diferencia entre las dos columnas queda visible aquí antes de que alguien la
-              detecte manualmente en un gráfico. Idealmente ambas columnas coinciden siempre. */}
+              detecte manualmente en un gráfico.
+              "Cursaron" NO se compara entre oficial y recalculado: en Supabase los 777
+              participantes de la cohorte tienen fila de enrollment en los 7 cursos por
+              construcción (import en bloque), así que ese número siempre da 777 y no refleja
+              participación real curso por curso — solo Q10 sabe quién genuinamente intentó
+              cada curso. En su lugar, "Cursando ahora" muestra cuántos activos siguen por
+              debajo de 80% en ESE curso puntual (2026-07-23, a pedido de Samuel). */}
           {esActual && programa === 'jc' && aprobacionAjustadaProg.length > 0 && (
             <Seccion
               titulo="Verificación cruzada: aprobación oficial vs. recalculada"
-              nota="Compara aprobacion_cursos (pipeline oficial de Q10, vía Seguimiento) contra un recálculo directo desde Supabase (enrollments + en_seguimiento_jc). Si difieren, probablemente el sync automático quedó atrasado."
+              nota="Aprobados compara aprobacion_cursos (pipeline oficial de Q10) contra un recálculo directo desde Supabase (enrollments + en_seguimiento_jc). 'Revisar' en cursos tempranos de la ruta (Bienvenida, Habilidades, Hackea, Emprendimiento) suele ser normal: Supabase solo tiene a los 777 participantes vigentes al momento del último sync, mientras Q10 ya trae 832 (760 activos + 74 retirados oficiales acumulados) — ~55 retiros antiguos nunca se cargaron en Supabase, así que el recálculo los sub-cuenta en los cursos que sí alcanzaron a completar antes de irse. Un 'Revisar' inesperado en un curso tardío (Lógica, IA) sí amerita revisar el sync. Cursando ahora = activos con avance <80% en ese curso puntual (no comparable con Q10: no reemplaza el conteo oficial de quién intentó cada curso)."
             >
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -867,23 +885,25 @@ export default function Pagina() {
                     <tr className="text-left text-slate-500 border-b border-slate-200">
                       <th className="py-2 pr-4">Curso</th>
                       <th className="py-2 pr-4 text-right">Cursaron (oficial)</th>
-                      <th className="py-2 pr-4 text-right">Cursaron (recalculado)</th>
+                      <th className="py-2 pr-4 text-right">Cursando ahora (recalculado)</th>
                       <th className="py-2 pr-4 text-right">Aprobados (oficial)</th>
                       <th className="py-2 pr-4 text-right">Aprobados (recalculado)</th>
-                      <th className="py-2 text-right">¿Coincide?</th>
+                      <th className="py-2 text-right">¿Coincide aprobados?</th>
                     </tr>
                   </thead>
                   <tbody>
                     {aprobacionAjustadaProg.map((aj) => {
-                      const of = aprobacionProg.find((a) => a.curso === aj.curso);
+                      const norm = (s: string) => s.trim().toUpperCase();
+                      const of = aprobacionProg.find((a) => norm(a.curso) === norm(aj.curso));
                       const aprobOf = of ? (of.aprobados_total ?? of.aprobados + of.aprobados_retirados) : null;
                       const aprobAj = aj.aprobados_total ?? aj.aprobados + aj.aprobados_retirados;
-                      const coincide = of ? of.cursaron === aj.cursaron && aprobOf === aprobAj : false;
+                      const cursandoAhora = (aj.banda_0_25 ?? 0) + (aj.banda_26_80 ?? 0);
+                      const coincide = of ? aprobOf === aprobAj : false;
                       return (
                         <tr key={aj.curso} className="border-b border-slate-100">
                           <td className="py-2 pr-4">{aj.curso}</td>
                           <td className="py-2 pr-4 text-right">{of?.cursaron ?? '—'}</td>
-                          <td className="py-2 pr-4 text-right">{aj.cursaron}</td>
+                          <td className="py-2 pr-4 text-right">{cursandoAhora}</td>
                           <td className="py-2 pr-4 text-right">{aprobOf ?? '—'}</td>
                           <td className="py-2 pr-4 text-right">{aprobAj}</td>
                           <td className="py-2 text-right">
@@ -1214,6 +1234,36 @@ export default function Pagina() {
 
       {tab === 'Emoflow' && programa === 'jc' && (
         <>
+          {/* Toggle de alcance. El CSV de Emoflow arrastra el histórico completo (827): además
+              de los estudiantes vigentes trae 17 en retiro probable y 68 que nunca llegaron a
+              matricularse en Q10 (postulantes / retirados de años anteriores). Por defecto se
+              muestra el universo canónico (742) para que este bloque cuadre con el resto del
+              panel; "Todos" permite ver la foto histórica completa. */}
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <div className="flex gap-1 tarjeta-glass p-1 w-fit">
+              {([['canonico', 'Solo estudiantes actuales'], ['todos', 'Todos (histórico)']] as const).map(
+                ([a, txt]) => (
+                  <button
+                    key={a}
+                    onClick={() => setAlcanceEmoflow(a)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                      alcanceEmoflow === a
+                        ? 'pill-metal pill-metal-azul'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {txt}
+                  </button>
+                ),
+              )}
+            </div>
+            <p className="text-xs text-slate-500 max-w-xl">
+              {alcanceEmoflow === 'canonico'
+                ? 'Solo estudiantes vigentes según la pestaña Seguimiento — coherente con el resto del panel.'
+                : 'Universo histórico completo del CSV de Emoflow: suma personas en retiro probable y usuarios que nunca se matricularon en Q10.'}
+            </p>
+          </div>
+
           {emoflowKpis ? (
             <>
               {/* Resumen en palabras — el reporte diario, generado solo */}
@@ -1239,7 +1289,13 @@ export default function Pagina() {
                 <Kpi
                   titulo={ciudadElegida ? `Estudiantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : 'Estudiantes con Emoflow'}
                   valor={emoflowKpis.participantes.toLocaleString('es-CO')}
-                  detalle={ciudadElegida ? undefined : `${(datos.emoflowResumen?.[0]?.con_match_supabase ?? 0).toLocaleString('es-CO')} cruzan con nuestra cohorte`}
+                  detalle={
+                    ciudadElegida
+                      ? undefined
+                      : alcanceEmoflow === 'canonico'
+                        ? 'matriculados y vigentes en Seguimiento'
+                        : `${(datos.emoflowResumen?.[0]?.con_match_supabase ?? 0).toLocaleString('es-CO')} cruzan con nuestra cohorte`
+                  }
                 />
                 <Kpi
                   titulo="Activos (últimos 7 días)"

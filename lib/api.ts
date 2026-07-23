@@ -357,10 +357,17 @@ export interface Datos {
   emoflowDiario: EmoflowIngresoDiario[];
   retiroProbableJc: RetiroProbableJc[];
   aprobacionAjustada: AprobacionCursoAjustado[];
+  // Espejos canónicos de las 4 fuentes Emoflow: mismas columnas, pero restringidos a
+  // matriculados presentes en la pestaña Seguimiento (742 vs 827). Alimentan el toggle
+  // "Solo estudiantes actuales" / "Todos (histórico)". Ver migración 011_emoflow_canonico.sql.
+  emoflowResumenCanonico: EmoflowResumen[];
+  emoflowPorCiudadCanonico: EmoflowPorCiudad[];
+  emoflowBandasCanonico: EmoflowBanda[];
+  emoflowBandasCiudadCanonico: EmoflowBandaCiudad[];
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -388,8 +395,12 @@ export async function cargarTodo(): Promise<Datos> {
       leerPaginado<EmoflowIngresoDiario>('emoflow_ingresos_diario?order=fecha.asc'),
       leer<RetiroProbableJc>('v_retiro_probable_jc'),
       leer<AprobacionCursoAjustado>('v_aprobacion_cursos_jc_ajustado?order=cursaron.desc'),
+      leer<EmoflowResumen>('v_emoflow_resumen_canonico'),
+      leer<EmoflowPorCiudad>('v_emoflow_por_ciudad_canonico?order=participantes.desc'),
+      leer<EmoflowBanda>('v_emoflow_bandas_canonico?order=orden.asc'),
+      leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad_canonico?order=orden.asc'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {
