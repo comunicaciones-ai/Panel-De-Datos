@@ -371,6 +371,28 @@ export default function Pagina() {
     [datos, programa, cohorte],
   );
 
+  // Retiro probable JC: personas fuera de Seguimiento (Sheet) que Q10 aún no marca retiradas
+  // oficialmente. Alerta complementaria, en duda hasta que Q10 lo confirme — no se mezcla con
+  // cohorte_ingresos.retirados (oficial). Solo existe para JC.
+  const retiroProbable = useMemo(
+    () =>
+      datos && programa === 'jc'
+        ? datos.retiroProbableJc.find((r) => r.cohorte === cohorte) ?? null
+        : null,
+    [datos, programa, cohorte],
+  );
+
+  // Verificación cruzada: misma forma que aprobacion_cursos pero recalculada desde
+  // enrollments + en_seguimiento_jc, para detectar si el pipeline oficial de Q10 se
+  // desincroniza de Supabase (como pasó el 2026-07-23 con un sync atrasado).
+  const aprobacionAjustadaProg = useMemo(
+    () =>
+      datos && programa === 'jc'
+        ? datos.aprobacionAjustada.filter((a) => a.cohorte === cohorte)
+        : [],
+    [datos, programa, cohorte],
+  );
+
   // Distribución de estudiantes por # de cursos aprobados (histograma). Se rellenan los huecos
   // (0..max) para que el eje sea continuo y muestre honestamente los tramos sin nadie.
   const distribucionEst = useMemo(() => {
@@ -762,6 +784,39 @@ export default function Pagina() {
               )}
             </Seccion>
           )}
+          {/* Retiro probable JC — alerta complementaria (v_retiro_probable_jc), NO oficial:
+              gente que ya no está en la pestaña Seguimiento pero Q10 no la ha marcado retirada.
+              Pendiente de confirmar; no resta de cohorte_ingresos.retirados. */}
+          {esActual && programa === 'jc' && retiroProbable && retiroProbable.retiro_probable_total > 0 && (
+            <Seccion
+              titulo="Retiro probable (pendiente de confirmar en Q10)"
+              nota={`${retiroProbable.retiro_probable_total} persona(s) ya no aparecen en la pestaña Seguimiento del equipo, pero Q10 aún no las marca retiradas oficialmente — puede tratarse de un retiro real en trámite o de una falsa alarma. No se cuentan como retiradas oficiales hasta que Q10 lo confirme.`}
+            >
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <EstadoStat
+                  etiqueta="Ya habían aprobado"
+                  valor={retiroProbable.retiro_probable_aprobado}
+                  total={retiroProbable.retiro_probable_total}
+                  color={C.amarillo}
+                  detalle="avance prom. > 80% antes de salir de Seguimiento"
+                />
+                <EstadoStat
+                  etiqueta="No habían aprobado"
+                  valor={retiroProbable.retiro_probable_no_aprobado}
+                  total={retiroProbable.retiro_probable_total}
+                  color={C.rojo}
+                  detalle="avance prom. ≤ 80%"
+                />
+                <EstadoStat
+                  etiqueta="Total en duda"
+                  valor={retiroProbable.retiro_probable_total}
+                  total={retiroProbable.retiro_probable_total}
+                  color={C.naranja}
+                  detalle={`avance promedio ${retiroProbable.avance_promedio ?? '—'}%`}
+                />
+              </div>
+            </Seccion>
+          )}
           {/* El desglose de aprobación (aprobados/retirados) sale de aprobacion_cursos, que no
               trae grupo_ciudad. Con una ciudad elegida caemos al gráfico de completación, que
               sí está desglosado por ciudad. */}
@@ -795,6 +850,55 @@ export default function Pagina() {
                     }))
                   : cursosProg}
               />
+            </Seccion>
+          )}
+          {/* Verificación cruzada oficial vs. ajustado (v_aprobacion_cursos_jc_ajustado). Si el
+              sync automático de aprobacion_cursos se atrasa (como pasó el 2026-07-23), la
+              diferencia entre las dos columnas queda visible aquí antes de que alguien la
+              detecte manualmente en un gráfico. Idealmente ambas columnas coinciden siempre. */}
+          {esActual && programa === 'jc' && aprobacionAjustadaProg.length > 0 && (
+            <Seccion
+              titulo="Verificación cruzada: aprobación oficial vs. recalculada"
+              nota="Compara aprobacion_cursos (pipeline oficial de Q10, vía Seguimiento) contra un recálculo directo desde Supabase (enrollments + en_seguimiento_jc). Si difieren, probablemente el sync automático quedó atrasado."
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-500 border-b border-slate-200">
+                      <th className="py-2 pr-4">Curso</th>
+                      <th className="py-2 pr-4 text-right">Cursaron (oficial)</th>
+                      <th className="py-2 pr-4 text-right">Cursaron (recalculado)</th>
+                      <th className="py-2 pr-4 text-right">Aprobados (oficial)</th>
+                      <th className="py-2 pr-4 text-right">Aprobados (recalculado)</th>
+                      <th className="py-2 text-right">¿Coincide?</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aprobacionAjustadaProg.map((aj) => {
+                      const of = aprobacionProg.find((a) => a.curso === aj.curso);
+                      const aprobOf = of ? (of.aprobados_total ?? of.aprobados + of.aprobados_retirados) : null;
+                      const aprobAj = aj.aprobados_total ?? aj.aprobados + aj.aprobados_retirados;
+                      const coincide = of ? of.cursaron === aj.cursaron && aprobOf === aprobAj : false;
+                      return (
+                        <tr key={aj.curso} className="border-b border-slate-100">
+                          <td className="py-2 pr-4">{aj.curso}</td>
+                          <td className="py-2 pr-4 text-right">{of?.cursaron ?? '—'}</td>
+                          <td className="py-2 pr-4 text-right">{aj.cursaron}</td>
+                          <td className="py-2 pr-4 text-right">{aprobOf ?? '—'}</td>
+                          <td className="py-2 pr-4 text-right">{aprobAj}</td>
+                          <td className="py-2 text-right">
+                            {coincide ? (
+                              <span className="font-medium" style={{ color: C.verde }}>Sí</span>
+                            ) : (
+                              <span className="font-medium" style={{ color: C.rojo }}>Revisar</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </Seccion>
           )}
         </>

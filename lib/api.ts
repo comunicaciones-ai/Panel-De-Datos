@@ -167,6 +167,39 @@ export interface AprobacionCurso {
   finalizado: boolean | null;
 }
 
+// v_retiro_probable_jc: personas con en_seguimiento_jc=false — no aparecen en la pestaña
+// Seguimiento del Sheet pero Q10 aún no las marca retiradas oficialmente. Alerta de retiro
+// PENDIENTE DE CONFIRMAR, complementaria a cohorte_ingresos.retirados (oficial), no lo
+// reemplaza. Solo JC. Ver docs/procesos/supabase-estructura.md.
+export interface RetiroProbableJc {
+  cohorte: string;
+  retiro_probable_total: number;
+  retiro_probable_aprobado: number;
+  retiro_probable_no_aprobado: number;
+  avance_promedio: string | number | null;
+}
+
+// v_aprobacion_cursos_jc_ajustado: espejo de aprobacion_cursos (mismas columnas) pero
+// recalculado desde enrollments + en_seguimiento_jc en vez del pipeline Q10. Sirve como
+// verificación cruzada — si algún día vuelve a divergir de aprobacion_cursos (ej. por un
+// sync atrasado, como pasó el 2026-07-23), la diferencia queda visible en el panel.
+export interface AprobacionCursoAjustado {
+  cohorte: string;
+  curso: string;
+  programa: 'jc';
+  cursaron: number;
+  activos: number;
+  aprobados: number;
+  aprobados_retirados: number;
+  retirados: number;
+  banda_0_25: number;
+  banda_26_80: number;
+  banda_81_100: number;
+  aprobados_total: number;
+  promedio: string | number | null;
+  pct_aprobados: string | number | null;
+}
+
 // v_mr_demografia: agregados sociodemográficos de Mujeres ROFÉ (fuente BD-Mujeres ROFÉ).
 // Formato largo: una fila por (dimension, categoria).
 export interface MrDemografia {
@@ -322,10 +355,12 @@ export interface Datos {
   historialEmoflow: HistorialEmoflow[];
   emoflowActividadSemanal: EmoflowActividadSemanal[];
   emoflowDiario: EmoflowIngresoDiario[];
+  retiroProbableJc: RetiroProbableJc[];
+  aprobacionAjustada: AprobacionCursoAjustado[];
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowActividadSemanal, emoflowDiario] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -351,8 +386,10 @@ export async function cargarTodo(): Promise<Datos> {
       leer<HistorialEmoflow>('historial_emoflow?order=fecha.asc'),
       leer<EmoflowActividadSemanal>('emoflow_actividad_semanal?order=semana_inicio.asc'),
       leerPaginado<EmoflowIngresoDiario>('emoflow_ingresos_diario?order=fecha.asc'),
+      leer<RetiroProbableJc>('v_retiro_probable_jc'),
+      leer<AprobacionCursoAjustado>('v_aprobacion_cursos_jc_ajustado?order=cursaron.desc'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowActividadSemanal, emoflowDiario };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {
