@@ -258,6 +258,28 @@ export interface EmoflowBandaCiudad extends EmoflowBanda {
   grupo_ciudad: string;
 }
 
+// v_pub_geografia: programa x cohorte x grupo_ciudad x municipio, con supresión de celdas
+// chicas (n<5, decisión de Lina 2026-07-30) agrupadas como "Área metropolitana". A diferencia
+// de v_programa_stats_por_ciudad (solo JC), esta vista cubre ambos programas — es la que
+// habilita el drill-down de municipio dentro de un grupo_ciudad.
+export interface GeografiaMunicipio {
+  programa: 'jc' | 'mr' | 'stand';
+  cohorte: string;
+  grupo_ciudad: string;
+  municipio: string;
+  personas: number;
+  avance_promedio: string | number | null;
+  aprobados: number;
+}
+
+// v_frescura: hace cuánto se actualizó cada proceso del pipeline. Un número correcto sin
+// fecha es tan engañoso como uno equivocado (ver diccionario-metricas.md).
+export interface Frescura {
+  proceso: string;
+  horas_desde_ultimo: string | number;
+  vencido: boolean;
+}
+
 export interface Datos {
   cohorte: CohorteStats[];
   cursos: CursoCompletion[];
@@ -282,10 +304,12 @@ export interface Datos {
   emoflowBandasCiudad: EmoflowBandaCiudad[];
   historialEmoflow: HistorialEmoflow[];
   emoflowParticipacion: EmoflowParticipacionSemanal[];
+  geografiaMunicipio: GeografiaMunicipio[];
+  frescura: Frescura[];
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, geografiaMunicipio, frescura] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -310,8 +334,10 @@ export async function cargarTodo(): Promise<Datos> {
       leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad?order=orden.asc'),
       leer<HistorialEmoflow>('historial_emoflow?order=fecha.asc'),
       leer<EmoflowParticipacionSemanal>('emoflow_participacion_semanal?order=fecha_corte.asc'),
+      leer<GeografiaMunicipio>('v_pub_geografia?order=personas.desc'),
+      leer<Frescura>('v_frescura'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, geografiaMunicipio, frescura };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {

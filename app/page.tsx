@@ -108,6 +108,10 @@ export default function Pagina() {
   // null = "la cohorte actual" (se resuelve con los datos; no hardcodear el año)
   const [cohorteElegida, setCohorteElegida] = useState<string | null>(null);
   const [ciudadElegida, setCiudadElegida] = useState<Ciudad>(null);
+  // Drill-down de municipio (v_pub_geografia) — independiente de ciudadElegida (que solo
+  // filtra JC hoy): cubre ambos programas, es donde vive la información nueva (municipios
+  // satélite de MR: Soacha, Jamundí, etc., con supresión n<5 ya aplicada en la vista).
+  const [grupoGeografia, setGrupoGeografia] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('Resumen');
   // Unidad del desglose "Estado de la cohorte": matrículas (inscripciones) o estudiantes (personas)
   const [unidadEstado, setUnidadEstado] = useState<'matriculas' | 'estudiantes'>('matriculas');
@@ -140,6 +144,53 @@ export default function Pagina() {
         : [],
     [datos],
   );
+
+  // Geografía por municipio (v_pub_geografia) — cubre jc y mr, a diferencia de `ciudades`
+  // arriba (solo JC, viene de v_demografia_grupo). No arrastrar el grupo elegido entre
+  // programas/cohortes distintos: puede no existir en el nuevo contexto.
+  useEffect(() => {
+    setGrupoGeografia(null);
+  }, [programa, cohorte]);
+
+  const geografiaProg = useMemo(
+    () =>
+      datos
+        ? datos.geografiaMunicipio.filter((g) => g.programa === programa && g.cohorte === cohorte)
+        : [],
+    [datos, programa, cohorte],
+  );
+
+  const gruposGeografia = useMemo(() => {
+    const totales = new Map<string, number>();
+    geografiaProg.forEach((g) =>
+      totales.set(g.grupo_ciudad, (totales.get(g.grupo_ciudad) ?? 0) + g.personas),
+    );
+    return Array.from(totales.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([grupo, total]) => ({ grupo, total }));
+  }, [geografiaProg]);
+
+  const municipiosGrupo = useMemo(
+    () =>
+      grupoGeografia
+        ? geografiaProg
+            .filter((g) => g.grupo_ciudad === grupoGeografia)
+            .sort((a, b) => b.personas - a.personas)
+        : [],
+    [geografiaProg, grupoGeografia],
+  );
+
+  // Frescura del dato (v_frescura) — un número correcto sin fecha es tan engañoso como uno
+  // equivocado. Prioriza los procesos que alimentan el Resumen (cohorte/aprobación/retiros);
+  // si por lo que sea no están, cae al máximo de todos para no dejar el badge vacío.
+  const frescuraResumen = useMemo(() => {
+    if (!datos || datos.frescura.length === 0) return null;
+    const claves = ['cohorte_ingresos', 'aprobacion_cursos', 'retiros (sync_retiros)'];
+    const relevantes = datos.frescura.filter((f) => claves.includes(f.proceso));
+    const lista = relevantes.length ? relevantes : datos.frescura;
+    const horas = Math.max(...lista.map((f) => Number(f.horas_desde_ultimo)));
+    return { horas, vencido: lista.some((f) => f.vencido) };
+  }, [datos]);
 
   const cursosProg = useMemo(
     () =>
@@ -497,6 +548,20 @@ export default function Pagina() {
         id="panel"
         className={`max-w-[1600px] mx-auto px-4 py-8 scroll-mt-20 ${programa === 'mr' ? 'tema-mr' : ''}`}
       >
+      {/* Fecha del dato — un número correcto sin fecha es tan engañoso como uno equivocado
+          (ver diccionario-metricas.md). vencido=true en cualquier proceso relevante avisa que
+          el pipeline nocturno pudo no correr. */}
+      {frescuraResumen && (
+        <p
+          className={`text-xs mb-3 ${
+            frescuraResumen.vencido ? 'text-rofe-rojo font-semibold' : 'text-slate-400'
+          }`}
+        >
+          {frescuraResumen.vencido ? '⚠ ' : ''}
+          Datos actualizados hace {frescuraResumen.horas.toFixed(1)} h
+          {frescuraResumen.vencido ? ' — puede que el sync nocturno no haya corrido' : ''}
+        </p>
+      )}
       {/* Selector de programa */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex gap-1 tarjeta-glass p-1">
@@ -678,6 +743,52 @@ export default function Pagina() {
                 </div>
               ) : (
                 <p className="text-sm text-slate-400">Sin datos por estudiante para esta cohorte.</p>
+              )}
+            </Seccion>
+          )}
+          {/* Geografía por municipio (v_pub_geografia, Fase 3 de plan-visualizacion-2026-07-30).
+              Click en un grupo (ej. BOG) despliega sus municipios. Los municipios con menos de
+              5 personas ya vienen agrupados como "Área metropolitana" desde la vista —
+              decisión de Lina, 2026-07-30 — no hay celda chica que filtrar acá. */}
+          {esActual && gruposGeografia.length > 0 && (
+            <Seccion
+              titulo={`Geografía — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
+              nota={
+                programa === 'jc'
+                  ? 'JC registra toda la conurbación bajo un solo municipio (usualmente "Bogotá D.C.") — Q10 no captura el municipio real, así que el desglose por grupo es la granularidad máxima disponible.'
+                  : 'Click en un grupo para ver sus municipios. Municipios con menos de 5 personas se agrupan como "Área metropolitana" para no exponer celdas identificables de una población vulnerable.'
+              }
+            >
+              <div className="flex gap-1 tarjeta-glass p-1 flex-wrap mb-3">
+                {gruposGeografia.map(({ grupo, total }) => (
+                  <button
+                    key={grupo}
+                    onClick={() => setGrupoGeografia(grupo === grupoGeografia ? null : grupo)}
+                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      grupoGeografia === grupo
+                        ? 'pill-metal pill-metal-naranja'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {ETIQUETA_GRUPO[grupo] ?? grupo} · {total}
+                  </button>
+                ))}
+              </div>
+              {grupoGeografia && municipiosGrupo.length > 0 && (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {municipiosGrupo.map((m) => (
+                    <div
+                      key={m.municipio}
+                      className="rounded-xl border border-slate-200/70 bg-white/40 p-2.5"
+                    >
+                      <p className="text-xs font-semibold text-slate-600">{m.municipio}</p>
+                      <p className="text-lg font-bold kpi-valor mt-1">{m.personas}</p>
+                      <p className="text-xs text-slate-400">
+                        avance {m.avance_promedio ?? '—'}% · {m.aprobados} al día
+                      </p>
+                    </div>
+                  ))}
+                </div>
               )}
             </Seccion>
           )}
