@@ -699,9 +699,27 @@ export default function Pagina() {
       }
     }
 
-    // Filtro "Estado": cambia qué número de cohorte_ingresos es EL número principal, no solo
-    // un detalle pasivo (§2.1.3 — reemplaza la exposición de solo lectura de antes).
-    const cifraEstado = !ing ? null : estado === 'activos' ? ing.activos : estado === 'retirados' ? ing.retirados : ing.ingresados;
+    // "Actuales" coherente con el desglose por ciudad (pedido de Samuel 2026-08-10): para JC en la
+    // cohorte viva, los ACTIVOS salen de v_pub_geografia — la MISMA fuente que los botones por
+    // ciudad y que la pestaña Seguimiento de monitorías (v_pub_geografia ≈ en_seguimiento_jc=true y
+    // no retirado). Así el titular suma EXACTO con las ciudades e iguala a panel_control_gui, que
+    // usa esa única fuente. La cohorte canónica de Q10 (cohorte_ingresos.activos) queda como base de
+    // aprobación en su propia sección; la diferencia (~4) son retiros por confirmar (ver "Retiro
+    // probable"). MR y cohortes históricas siguen con el número canónico (no tienen fuente Seguimiento).
+    const actualesGeo = datos.geografiaMunicipio
+      .filter((g) => g.programa === programa && g.cohorte === cohorte)
+      .reduce((s, g) => s + (g.personas ?? 0), 0);
+    const usarActualesSeguimiento = programa === 'jc' && esActual && !hayFiltroCiudad;
+    // Filtro "Estado": cambia qué número es EL número principal (§2.1.3).
+    const cifraEstado = !ing
+      ? null
+      : estado === 'activos'
+        ? usarActualesSeguimiento
+          ? actualesGeo
+          : ing.activos
+        : estado === 'retirados'
+          ? ing.retirados
+          : ing.ingresados;
 
     return {
       participantes,
@@ -715,29 +733,13 @@ export default function Pagina() {
       estadoEst,
       edadProm,
       cifraEstado,
+      usarActualesSeguimiento,
+      actualesGeo,
       ingresados: hayFiltroCiudad ? null : ing?.ingresados ?? null,
       activos: ing?.activos ?? null,
       retirados: ing?.retirados ?? null,
     };
   }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, aprobacionProg, mostrarCanonico, ingresosProg]);
-
-  // "En Seguimiento" (v_pub_seguimiento, migración 042): cuántos JC de la cohorte viva aparecen
-  // ESTA semana en la pestaña Seguimiento de la BD de Monitorias (fuente que mantiene el equipo al
-  // día). Se usa el rollup nacional (total exacto, no perdido por supresión por ciudad). JC-only y
-  // solo cohorte actual (el flag es NULL en MR/históricos por diseño del sync). Contrasta con
-  // "Activos" (Q10): la diferencia = personas ya fuera de Seguimiento que Q10 aún no marca retiradas.
-  const seguimientoJc = useMemo(() => {
-    if (!datos || programa !== 'jc' || !esActual) return null;
-    const nac = datos.pubSeguimiento.find(
-      (s) =>
-        s.ambito === 'nacional' &&
-        s.programa === 'jc' &&
-        s.cohorte === cohorte &&
-        s.estado === 'activo' &&
-        s.en_seguimiento_jc === true,
-    );
-    return nac?.total ?? null;
-  }, [datos, programa, esActual, cohorte]);
 
   const cambiarPrograma = (p: Programa) => setPrograma(p);
   const cambiarCohorte = (coh: string) => setCohorteElegida(coh);
@@ -1016,8 +1018,12 @@ export default function Pagina() {
                 valor={String(kpis.cifraEstado)}
                 detalle={
                   estado === 'todos'
-                    ? `Cohorte ${cohorte} completa: ${kpis.activos} activos + ${kpis.retirados} retirados (sin perfiles de prueba ni retiros institucionales)`
-                    : `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte}`
+                    ? `Cohorte ${cohorte} completa: ${kpis.ingresados} ingresados (canónico Q10, base de aprobación)`
+                    : estado === 'retirados'
+                      ? `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canónico Q10)`
+                      : kpis.usarActualesSeguimiento
+                        ? `Actuales en Seguimiento — suma exacta por ciudad. La cohorte canónica Q10 cuenta ${kpis.activos}; la diferencia son retiros por confirmar (ver "Retiro probable").`
+                        : `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte}`
                 }
               />
             ) : (
@@ -1059,19 +1065,6 @@ export default function Pagina() {
                 titulo="Cursos"
                 valor={String(cursosProg.length)}
                 detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${cohorte}`}
-              />
-            )}
-            {/* En Seguimiento (v_pub_seguimiento, 042): número que mantiene el equipo al día en la
-                pestaña Seguimiento, contrastado con "Activos" de Q10. JC + cohorte actual. */}
-            {esActual && programa === 'jc' && seguimientoJc !== null && (
-              <Kpi
-                titulo="En Seguimiento"
-                valor={String(seguimientoJc)}
-                detalle={
-                  kpis.activos != null
-                    ? `Aparecen esta semana en la pestaña Seguimiento (monitorías). Q10 cuenta ${kpis.activos} activos — la diferencia son posibles retiros aún sin confirmar.`
-                    : 'Aparecen esta semana en la pestaña Seguimiento (monitorías).'
-                }
               />
             )}
           </div>
