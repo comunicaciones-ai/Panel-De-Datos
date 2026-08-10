@@ -721,6 +721,24 @@ export default function Pagina() {
     };
   }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, aprobacionProg, mostrarCanonico, ingresosProg]);
 
+  // "En Seguimiento" (v_pub_seguimiento, migración 042): cuántos JC de la cohorte viva aparecen
+  // ESTA semana en la pestaña Seguimiento de la BD de Monitorias (fuente que mantiene el equipo al
+  // día). Se usa el rollup nacional (total exacto, no perdido por supresión por ciudad). JC-only y
+  // solo cohorte actual (el flag es NULL en MR/históricos por diseño del sync). Contrasta con
+  // "Activos" (Q10): la diferencia = personas ya fuera de Seguimiento que Q10 aún no marca retiradas.
+  const seguimientoJc = useMemo(() => {
+    if (!datos || programa !== 'jc' || !esActual) return null;
+    const nac = datos.pubSeguimiento.find(
+      (s) =>
+        s.ambito === 'nacional' &&
+        s.programa === 'jc' &&
+        s.cohorte === cohorte &&
+        s.estado === 'activo' &&
+        s.en_seguimiento_jc === true,
+    );
+    return nac?.total ?? null;
+  }, [datos, programa, esActual, cohorte]);
+
   const cambiarPrograma = (p: Programa) => setPrograma(p);
   const cambiarCohorte = (coh: string) => setCohorteElegida(coh);
 
@@ -1041,6 +1059,19 @@ export default function Pagina() {
                 titulo="Cursos"
                 valor={String(cursosProg.length)}
                 detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${cohorte}`}
+              />
+            )}
+            {/* En Seguimiento (v_pub_seguimiento, 042): número que mantiene el equipo al día en la
+                pestaña Seguimiento, contrastado con "Activos" de Q10. JC + cohorte actual. */}
+            {esActual && programa === 'jc' && seguimientoJc !== null && (
+              <Kpi
+                titulo="En Seguimiento"
+                valor={String(seguimientoJc)}
+                detalle={
+                  kpis.activos != null
+                    ? `Aparecen esta semana en la pestaña Seguimiento (monitorías). Q10 cuenta ${kpis.activos} activos — la diferencia son posibles retiros aún sin confirmar.`
+                    : 'Aparecen esta semana en la pestaña Seguimiento (monitorías).'
+                }
               />
             )}
           </div>
