@@ -16,6 +16,32 @@ async function leer<T>(recurso: string): Promise<T[]> {
   return resp.json();
 }
 
+// PostgREST corta en 1000 filas por request (aunque se pida limit mayor). Para tablas
+// grandes paginamos con el header Range hasta traer todo — si no, se pierden filas
+// (justo las más recientes cuando el orden es fecha.asc).
+async function leerPaginado<T>(recurso: string, paso = 1000): Promise<T[]> {
+  const out: T[] = [];
+  let desde = 0;
+  for (;;) {
+    const resp = await fetch(`${URL_BASE}/rest/v1/${recurso}`, {
+      headers: {
+        apikey: ANON_KEY,
+        Authorization: `Bearer ${ANON_KEY}`,
+        'Range-Unit': 'items',
+        Range: `${desde}-${desde + paso - 1}`,
+      },
+    });
+    if (!resp.ok && resp.status !== 206) {
+      throw new Error(`Supabase ${recurso}: HTTP ${resp.status}`);
+    }
+    const lote = (await resp.json()) as T[];
+    out.push(...lote);
+    if (lote.length < paso) break;
+    desde += paso;
+  }
+  return out;
+}
+
 export interface CohorteStats {
   cohorte: string;
   programa: 'jc' | 'mr' | 'stand';
@@ -141,6 +167,39 @@ export interface AprobacionCurso {
   finalizado: boolean | null;
 }
 
+// v_retiro_probable_jc: personas con en_seguimiento_jc=false — no aparecen en la pestaña
+// Seguimiento del Sheet pero Q10 aún no las marca retiradas oficialmente. Alerta de retiro
+// PENDIENTE DE CONFIRMAR, complementaria a cohorte_ingresos.retirados (oficial), no lo
+// reemplaza. Solo JC. Ver docs/procesos/supabase-estructura.md.
+export interface RetiroProbableJc {
+  cohorte: string;
+  retiro_probable_total: number;
+  retiro_probable_aprobado: number;
+  retiro_probable_no_aprobado: number;
+  avance_promedio: string | number | null;
+}
+
+// v_aprobacion_cursos_jc_ajustado: espejo de aprobacion_cursos (mismas columnas) pero
+// recalculado desde enrollments + en_seguimiento_jc en vez del pipeline Q10. Sirve como
+// verificación cruzada — si algún día vuelve a divergir de aprobacion_cursos (ej. por un
+// sync atrasado, como pasó el 2026-07-23), la diferencia queda visible en el panel.
+export interface AprobacionCursoAjustado {
+  cohorte: string;
+  curso: string;
+  programa: 'jc';
+  cursaron: number;
+  activos: number;
+  aprobados: number;
+  aprobados_retirados: number;
+  retirados: number;
+  banda_0_25: number;
+  banda_26_80: number;
+  banda_81_100: number;
+  aprobados_total: number;
+  promedio: string | number | null;
+  pct_aprobados: string | number | null;
+}
+
 // v_mr_demografia: agregados sociodemográficos de Mujeres ROFÉ (fuente BD-Mujeres ROFÉ).
 // Formato largo: una fila por (dimension, categoria).
 export interface MrDemografia {
@@ -233,14 +292,27 @@ export interface HistorialEmoflow {
 // emoflow_participacion_semanal: % de participación (Completado/Real) por ciudad, del bloque
 // EMOFLOW de la pestaña Estadísticas (BD Seguimiento de Monitorias). Snapshot diario — arranca
 // 2026-07-15; el mismo número de semana se re-lee varios días para capturar el avance intra-semana.
-export interface EmoflowParticipacionSemanal {
-  fecha_corte: string;
-  semana: number;
+// emoflow_actividad_semanal: actividad SEMANAL real por ciudad, derivada del CSV de Emoflow
+// (usuarios activos únicos por semana / roster de la ciudad). Semana etiquetada por su lunes.
+// Reemplaza la participación semanal que venía de la hoja de monitorías (fuente externa).
+export interface EmoflowActividadSemanal {
+  semana_inicio: string;
   grupo_ciudad: string;
-  seleccionados: number | null;
-  real: number | null;
-  completado: number | null;
-  avance_pct: number | string | null;
+  usuarios_activos: number;
+  roster: number;
+  pct_activos: number | string;
+  fuente: string;
+}
+
+// emoflow_ingresos_diario: serie DIARIA REAL de ingresos por ciudad (+ NACIONAL),
+// derivada de los timestamps del CSV de registro-ingresos de Emoflow. Arranca 2026-03-18.
+// Reemplaza el backfill plano de historial_emoflow (que repetía un mismo valor).
+export interface EmoflowIngresoDiario {
+  fecha: string;
+  grupo_ciudad: string;
+  ingresos: number;
+  usuarios_activos: number;
+  fuente: string;
 }
 
 export interface EmoflowBanda {
@@ -361,16 +433,19 @@ export interface Datos {
   emoflowBandas: EmoflowBanda[];
   emoflowBandasCiudad: EmoflowBandaCiudad[];
   historialEmoflow: HistorialEmoflow[];
-  emoflowParticipacion: EmoflowParticipacionSemanal[];
   geografiaMunicipio: GeografiaMunicipio[];
   frescura: Frescura[];
   // Fase 1/2 del rediseño (037) — ver sección de interfaces arriba.
   pubDemografia: PubDemografia[];
   pubEmprendimiento: PubEmprendimiento[];
   pubAsistencia: PubAsistencia[];
-  // Trío del filtro "Estado" para Emoflow: Activos=canonico (migración 011, ya existía sin
-  // wiring), Todos=emoflowResumen/PorCiudad/Bandas/BandasCiudad (arriba, sin sufijo),
-  // Retirados=retirado (migración 037).
+  // Emoflow serie diaria/semanal real + JC retiro probable/aprobación ajustada (producción jul-2026).
+  emoflowActividadSemanal: EmoflowActividadSemanal[];
+  emoflowDiario: EmoflowIngresoDiario[];
+  retiroProbableJc: RetiroProbableJc[];
+  aprobacionAjustada: AprobacionCursoAjustado[];
+  // Trío del filtro "Estado" para Emoflow: Activos=canonico (migración 011), Todos=sin sufijo,
+  // Retirados=retirado (migración 037). Espejos canónicos restringidos a Seguimiento (742 vs 827).
   emoflowResumenCanonico: EmoflowResumen[];
   emoflowPorCiudadCanonico: EmoflowPorCiudad[];
   emoflowBandasCanonico: EmoflowBanda[];
@@ -382,7 +457,7 @@ export interface Datos {
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -406,12 +481,15 @@ export async function cargarTodo(): Promise<Datos> {
       leer<EmoflowBanda>('v_emoflow_bandas?order=orden.asc'),
       leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad?order=orden.asc'),
       leer<HistorialEmoflow>('historial_emoflow?order=fecha.asc'),
-      leer<EmoflowParticipacionSemanal>('emoflow_participacion_semanal?order=fecha_corte.asc'),
       leer<GeografiaMunicipio>('v_pub_geografia?order=personas.desc'),
       leer<Frescura>('v_frescura'),
       leer<PubDemografia>('v_pub_demografia'),
       leer<PubEmprendimiento>('v_pub_emprendimiento'),
       leer<PubAsistencia>('v_pub_asistencia'),
+      leer<EmoflowActividadSemanal>('emoflow_actividad_semanal?order=semana_inicio.asc'),
+      leerPaginado<EmoflowIngresoDiario>('emoflow_ingresos_diario?order=fecha.asc'),
+      leer<RetiroProbableJc>('v_retiro_probable_jc'),
+      leer<AprobacionCursoAjustado>('v_aprobacion_cursos_jc_ajustado?order=cursaron.desc'),
       leer<EmoflowResumen>('v_emoflow_resumen_canonico'),
       leer<EmoflowPorCiudad>('v_emoflow_por_ciudad_canonico?order=participantes.desc'),
       leer<EmoflowBanda>('v_emoflow_bandas_canonico?order=orden.asc'),
@@ -421,7 +499,7 @@ export async function cargarTodo(): Promise<Datos> {
       leer<EmoflowBanda>('v_emoflow_bandas_retirado?order=orden.asc'),
       leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad_retirado?order=orden.asc'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {

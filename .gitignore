@@ -2,6 +2,7 @@
 node_modules/
 .next/
 out/
+tsconfig.tsbuildinfo
 
 # Entorno (el anon key por defecto está en lib/api.ts — es público por diseño;
 # los overrides van aquí y nunca a Git)

@@ -79,6 +79,18 @@ const COLOR_GENERO: Record<string, string> = {
   Masculino: C.azul2,
 };
 
+const MESES_ES = [
+  'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+  'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
+];
+// "2026-07-20" → "20 de julio". Para el encabezado del resumen del día.
+function fechaCortaEs(iso?: string | null): string | null {
+  if (!iso) return null;
+  const [, m, d] = iso.split('-').map(Number);
+  if (!m || !d) return null;
+  return `${d} de ${MESES_ES[m - 1]}`;
+}
+
 function Kpi({ titulo, valor, detalle }: { titulo: string; valor: string; detalle?: string }) {
   return (
     <motion.div
@@ -190,6 +202,11 @@ export default function Pagina() {
   // Unidad del desglose "Estado de la cohorte": matrículas (inscripciones) o estudiantes (personas).
   // Solo tiene sentido bajo Estado=Activos (v_cohorte_estudiantes* no distingue retirados).
   const [unidadEstadoCohorte, setUnidadEstadoCohorte] = useState<'matriculas' | 'estudiantes'>('matriculas');
+  // Alcance del bloque Emoflow. 'canonico' (default) = solo estudiantes vigentes según la
+  // pestaña Seguimiento (742) — coherente con el resto del panel. 'todos' = universo
+  // histórico completo del CSV de Emoflow (827): incluye 17 en retiro probable y 68 que
+  // nunca fueron matriculados en Supabase (postulantes / retirados antiguos).
+  const [alcanceEmoflow, setAlcanceEmoflow] = useState<'canonico' | 'todos'>('canonico');
 
   useEffect(() => {
     cargarTodo().then(setDatos).catch((e) => setError(String(e)));
@@ -369,40 +386,14 @@ export default function Pagina() {
     );
   }, [datos, programa, cohorte, estado, ciudadElegida]);
 
-  // Emoflow: trío del filtro Estado. Activos=_canonico (migración 011), Todos=vista original
-  // (sin sufijo), Retirados=_retirado (migración 037) — decisión de diseño de la Fase 1: no
-  // calcular "Retirados" como Todos-Activos en el frontend (no alinea bien el desglose por
-  // ciudad/banda).
-  const emoflowResumenSrc = useMemo(() => {
-    if (!datos) return [];
-    if (estado === 'activos') return datos.emoflowResumenCanonico;
-    if (estado === 'retirados') return datos.emoflowResumenRetirado;
-    return datos.emoflowResumen;
-  }, [datos, estado]);
-  const emoflowPorCiudadSrc = useMemo(() => {
-    if (!datos) return [];
-    if (estado === 'activos') return datos.emoflowPorCiudadCanonico;
-    if (estado === 'retirados') return datos.emoflowPorCiudadRetirado;
-    return datos.emoflowPorCiudad;
-  }, [datos, estado]);
-  const emoflowBandasSrc = useMemo(() => {
-    if (!datos) return [];
-    if (estado === 'activos') return datos.emoflowBandasCanonico;
-    if (estado === 'retirados') return datos.emoflowBandasRetirado;
-    return datos.emoflowBandas;
-  }, [datos, estado]);
-  const emoflowBandasCiudadSrc = useMemo(() => {
-    if (!datos) return [];
-    if (estado === 'activos') return datos.emoflowBandasCiudadCanonico;
-    if (estado === 'retirados') return datos.emoflowBandasCiudadRetirado;
-    return datos.emoflowBandasCiudad;
-  }, [datos, estado]);
-
   // Emoflow — KPIs. Sin ciudad: agregado nacional. Con ciudad: la fila de esa ciudad (JC-only,
   // Emoflow no tiene matrículas MR — ver "no aplica" del tab).
   const emoflowKpis = useMemo(() => {
+    if (!datos) return null;
+    const canon = alcanceEmoflow === 'canonico';
     if (ciudadElegida) {
-      const c = emoflowPorCiudadSrc?.find((e) => e.grupo_ciudad === ciudadElegida);
+      const fuente = canon ? datos.emoflowPorCiudadCanonico : datos.emoflowPorCiudad;
+      const c = fuente?.find((e) => e.grupo_ciudad === ciudadElegida);
       if (!c) return null;
       return {
         participantes: c.participantes,
@@ -412,7 +403,7 @@ export default function Pagina() {
         inactivos30: c.inactivos_30d,
       };
     }
-    const r = emoflowResumenSrc?.[0];
+    const r = (canon ? datos.emoflowResumenCanonico : datos.emoflowResumen)?.[0];
     if (!r) return null;
     return {
       participantes: r.participantes,
@@ -421,12 +412,16 @@ export default function Pagina() {
       activos7: r.activos_7d,
       inactivos30: r.inactivos_30d,
     };
-  }, [emoflowResumenSrc, emoflowPorCiudadSrc, ciudadElegida]);
+  }, [datos, ciudadElegida, alcanceEmoflow]);
 
   const emoflowBandas = useMemo(() => {
+    if (!datos) return [];
+    const canon = alcanceEmoflow === 'canonico';
     const filas = ciudadElegida
-      ? (emoflowBandasCiudadSrc ?? []).filter((b) => b.grupo_ciudad === ciudadElegida)
-      : (emoflowBandasSrc ?? []);
+      ? ((canon ? datos.emoflowBandasCiudadCanonico : datos.emoflowBandasCiudad) ?? []).filter(
+          (b) => b.grupo_ciudad === ciudadElegida,
+        )
+      : ((canon ? datos.emoflowBandasCanonico : datos.emoflowBandas) ?? []);
     return [...filas]
       .sort((a, b) => a.orden - b.orden)
       .map((b) => ({
@@ -434,43 +429,118 @@ export default function Pagina() {
         participantes: b.participantes,
         pct_aprobacion: Number(b.pct_aprobacion ?? 0),
       }));
-  }, [emoflowBandasSrc, emoflowBandasCiudadSrc, ciudadElegida]);
+  }, [datos, ciudadElegida, alcanceEmoflow]);
 
   const emoflowCiudades = useMemo(() => {
-    return (emoflowPorCiudadSrc ?? []).map((c) => ({
+    if (!datos) return [];
+    const fuente =
+      alcanceEmoflow === 'canonico' ? datos.emoflowPorCiudadCanonico : datos.emoflowPorCiudad;
+    return (fuente ?? []).map((c) => ({
       etiqueta: ETIQUETA_GRUPO[c.grupo_ciudad] ?? c.grupo_ciudad,
       ingresos_promedio: Number(c.ingresos_promedio ?? 0),
     }));
-  }, [emoflowPorCiudadSrc]);
+  }, [datos, alcanceEmoflow]);
 
-  // % de participación Emoflow (Completado/Real) por ciudad — snapshot más reciente para la
-  // barra "hoy", serie completa para la evolución. Fuente: bloque EMOFLOW de Estadísticas.
-  // Sin dimensión de Estado en la fuente — se muestra igual en los 3 estados.
-  const participacionUltima = useMemo(() => {
-    const filas = datos?.emoflowParticipacion ?? [];
-    if (filas.length === 0) return { fecha: null as string | null, semana: null as number | null, datos: [] };
-    const fechaMax = filas.reduce((m, f) => (f.fecha_corte > m ? f.fecha_corte : m), filas[0].fecha_corte);
-    const deHoy = filas.filter((f) => f.fecha_corte === fechaMax);
-    return {
-      fecha: fechaMax,
-      semana: deHoy[0]?.semana ?? null,
-      datos: [...deHoy]
-        .sort((a, b) => Number(b.avance_pct ?? 0) - Number(a.avance_pct ?? 0))
-        .map((f) => ({
-          etiqueta: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
-          avance_pct: Number(f.avance_pct ?? 0),
-        })),
+  // Evolución semanal de la actividad en Emoflow (% de la matrícula activa por semana), por
+  // ciudad. Directo del CSV de Emoflow (tabla emoflow_actividad_semanal). Eje X = lunes de cada
+  // semana (ISO) → orden temporal correcto. Excluye NACIONAL (se muestran las líneas por ciudad).
+  // Una semana (lunes ISO) está COMPLETA si su domingo (lunes+6) ya pasó, según la última fecha
+  // con datos. Así excluimos la semana en curso, que aparecería artificialmente baja por llevar
+  // pocos días — no es un bajón real, es que aún no termina.
+  const semanaCompleta = useMemo(() => {
+    const maxData = (datos?.emoflowDiario ?? []).reduce((m, f) => (f.fecha > m ? f.fecha : m), '');
+    return (lunes: string) => {
+      if (!maxData) return true;
+      const dom = new Date(`${lunes}T00:00:00Z`);
+      dom.setUTCDate(dom.getUTCDate() + 6);
+      return dom.toISOString().slice(0, 10) <= maxData;
     };
   }, [datos]);
 
-  const participacionEvolucion = useMemo(() => {
-    const filas = datos?.emoflowParticipacion ?? [];
-    return filas.map((f) => ({
-      fecha: f.fecha_corte,
-      curso: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
-      valor: f.completado != null ? Number(f.completado) : null,
-    }));
-  }, [datos]);
+  const actividadSemanalEvolucion = useMemo(() => {
+    const filas = (datos?.emoflowActividadSemanal ?? []).filter(
+      (f) => f.grupo_ciudad !== 'NACIONAL' && semanaCompleta(f.semana_inicio),
+    );
+    return [...filas]
+      .sort((a, b) => a.semana_inicio.localeCompare(b.semana_inicio))
+      .map((f) => ({
+        fecha: f.semana_inicio,
+        curso: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
+        valor: Number(f.pct_activos ?? 0),
+      }));
+  }, [datos, semanaCompleta]);
+
+  // Snapshot de la ÚLTIMA SEMANA COMPLETA por ciudad (excluye la semana en curso).
+  const actividadSemanalUltima = useMemo(() => {
+    const filas = (datos?.emoflowActividadSemanal ?? []).filter(
+      (f) => f.grupo_ciudad !== 'NACIONAL' && semanaCompleta(f.semana_inicio),
+    );
+    if (filas.length === 0) return { semana: null as string | null, datos: [] };
+    const semanaSnap = filas.reduce((m, f) => (f.semana_inicio > m ? f.semana_inicio : m), filas[0].semana_inicio);
+    return {
+      semana: semanaSnap,
+      datos: filas
+        .filter((f) => f.semana_inicio === semanaSnap)
+        .sort((a, b) => Number(b.pct_activos ?? 0) - Number(a.pct_activos ?? 0))
+        .map((f) => ({
+          etiqueta: ETIQUETA_GRUPO[f.grupo_ciudad] ?? f.grupo_ciudad,
+          pct_activos: Number(f.pct_activos ?? 0),
+        })),
+    };
+  }, [datos, semanaCompleta]);
+
+  // ── Emoflow: bloques (solo datos propios de Emoflow, no de Q10) ────────────
+  // Correlación uso→aprendizaje: rango de % de aprobación entre la banda que menos
+  // entra y la que más. City-aware porque emoflowBandas ya respeta la ciudad.
+  const correlacion = useMemo(() => {
+    const aprob = emoflowBandas.map((b) => b.pct_aprobacion).filter((v) => v > 0);
+    if (aprob.length < 2) return null;
+    return { min: Math.min(...aprob), max: Math.max(...aprob) };
+  }, [emoflowBandas]);
+
+  // Serie DIARIA REAL de ingresos (reemplaza el backfill plano). Sin ciudad → NACIONAL;
+  // con ciudad elegida → esa ciudad. Dos líneas: ingresos y usuarios activos.
+  const evolucionDiaria = useMemo(() => {
+    const grupo = ciudadElegida ?? 'NACIONAL';
+    const filas = (datos?.emoflowDiario ?? []).filter((f) => f.grupo_ciudad === grupo);
+    const out: { fecha: string; curso: string; valor: number | null }[] = [];
+    for (const f of filas) {
+      out.push({ fecha: f.fecha, curso: 'Ingresos', valor: f.ingresos });
+      out.push({ fecha: f.fecha, curso: 'Usuarios activos', valor: f.usuarios_activos });
+    }
+    return out;
+  }, [datos, ciudadElegida]);
+
+  // Último día registrado (para el resumen en palabras).
+  const ultimoDiaEmoflow = useMemo(() => {
+    const grupo = ciudadElegida ?? 'NACIONAL';
+    const filas = (datos?.emoflowDiario ?? []).filter((f) => f.grupo_ciudad === grupo);
+    if (filas.length === 0) return null;
+    return filas.reduce((a, b) => (a.fecha > b.fecha ? a : b));
+  }, [datos, ciudadElegida]);
+
+  // Resumen en palabras: el equivalente automático del reporte diario de WhatsApp.
+  const narrativaEmoflow = useMemo(() => {
+    if (!emoflowKpis) return null;
+    const partes: string[] = [];
+    const pctAct = emoflowKpis.participantes
+      ? Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)
+      : 0;
+    const donde = ciudadElegida ? ` en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : '';
+    partes.push(
+      `${emoflowKpis.activos7.toLocaleString('es-CO')} de ${emoflowKpis.participantes.toLocaleString('es-CO')} estudiantes${donde} entraron al sistema en los últimos 7 días (${pctAct}%).`,
+    );
+    if (ultimoDiaEmoflow) {
+      const f = fechaCortaEs(ultimoDiaEmoflow.fecha);
+      partes.push(
+        `El último día registrado${f ? ` (${f})` : ''} hubo ${ultimoDiaEmoflow.ingresos.toLocaleString('es-CO')} ingresos de ${ultimoDiaEmoflow.usuarios_activos.toLocaleString('es-CO')} estudiantes.`,
+      );
+    }
+    if (emoflowKpis.inactivos30 > 0) {
+      partes.push(`${emoflowKpis.inactivos30.toLocaleString('es-CO')} llevan más de 30 días sin entrar — el grupo a vigilar.`);
+    }
+    return partes.join(' ');
+  }, [emoflowKpis, ciudadElegida, ultimoDiaEmoflow]);
 
   // Aprobación canónica de la cohorte (cursaron = activos + retirados) por programa
   const aprobacionProg = useMemo(
@@ -485,8 +555,30 @@ export default function Pagina() {
   // veces, en Resumen y en Cursos, con riesgo de desalinearse). Se consume igual en ambos tabs.
   const mostrarCanonico = esActual && aprobacionProg.length > 0;
 
-  // Distribución de estudiantes por # de cursos aprobados (histograma, solo Activos). Se
-  // rellenan los huecos (0..max) para que el eje sea continuo.
+  // Retiro probable JC: personas fuera de Seguimiento (Sheet) que Q10 aún no marca retiradas
+  // oficialmente. Alerta complementaria, en duda hasta que Q10 lo confirme — no se mezcla con
+  // cohorte_ingresos.retirados (oficial). Solo existe para JC.
+  const retiroProbable = useMemo(
+    () =>
+      datos && programa === 'jc'
+        ? datos.retiroProbableJc.find((r) => r.cohorte === cohorte) ?? null
+        : null,
+    [datos, programa, cohorte],
+  );
+
+  // Verificación cruzada: misma forma que aprobacion_cursos pero recalculada desde
+  // enrollments + en_seguimiento_jc, para detectar si el pipeline oficial de Q10 se
+  // desincroniza de Supabase (como pasó el 2026-07-23 con un sync atrasado).
+  const aprobacionAjustadaProg = useMemo(
+    () =>
+      datos && programa === 'jc'
+        ? datos.aprobacionAjustada.filter((a) => a.cohorte === cohorte)
+        : [],
+    [datos, programa, cohorte],
+  );
+
+  // Distribución de estudiantes por # de cursos aprobados (histograma). Se rellenan los huecos
+  // (0..max) para que el eje sea continuo y muestre honestamente los tramos sin nadie.
   const distribucionEst = useMemo(() => {
     if (!datos) return [] as { etiqueta: string; estudiantes: number }[];
     const filas = datos.estudiantesDist.filter(
@@ -1007,6 +1099,41 @@ export default function Pagina() {
               </div>
             </Seccion>
           )}
+          {/* Retiro probable JC — alerta complementaria (v_retiro_probable_jc), NO oficial:
+              gente que ya no está en la pestaña Seguimiento pero Q10 no la ha marcado retirada.
+              Pendiente de confirmar; no resta de cohorte_ingresos.retirados. */}
+          {esActual && programa === 'jc' && retiroProbable && retiroProbable.retiro_probable_total > 0 && (
+            <Seccion
+              titulo="Retiro probable (pendiente de confirmar en Q10)"
+              nota={`${retiroProbable.retiro_probable_total} persona(s) ya no aparecen en la pestaña Seguimiento del equipo, pero Q10 aún no las marca retiradas oficialmente — puede tratarse de un retiro real en trámite o de una falsa alarma. No se cuentan como retiradas oficiales hasta que Q10 lo confirme.`}
+            >
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <EstadoStat
+                  etiqueta="Ya habían aprobado"
+                  valor={retiroProbable.retiro_probable_aprobado}
+                  total={retiroProbable.retiro_probable_total}
+                  color={C.amarillo}
+                  detalle="avance prom. > 80% antes de salir de Seguimiento"
+                />
+                <EstadoStat
+                  etiqueta="No habían aprobado"
+                  valor={retiroProbable.retiro_probable_no_aprobado}
+                  total={retiroProbable.retiro_probable_total}
+                  color={C.rojo}
+                  detalle="avance prom. ≤ 80%"
+                />
+                <EstadoStat
+                  etiqueta="Total en duda"
+                  valor={retiroProbable.retiro_probable_total}
+                  total={retiroProbable.retiro_probable_total}
+                  color={C.naranja}
+                  detalle={`avance promedio ${retiroProbable.avance_promedio ?? '—'}%`}
+                />
+              </div>
+            </Seccion>
+          )}
+          {/* El desglose de aprobación (aprobados/retirados) sale de aprobacion_cursos, que no
+              trae grupo_ciudad. Con una ciudad/municipio elegido caemos al gráfico de completación. */}
           {mostrarCanonico && !hayFiltroCiudad ? (
             <Seccion
               titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`}
@@ -1034,6 +1161,63 @@ export default function Pagina() {
                     }))
                   : cursosProg}
               />
+            </Seccion>
+          )}
+          {/* Verificación cruzada oficial vs. ajustado (v_aprobacion_cursos_jc_ajustado). Si el
+              sync automático de aprobacion_cursos se atrasa (como pasó el 2026-07-23), la
+              diferencia entre las dos columnas queda visible aquí antes de que alguien la
+              detecte manualmente en un gráfico.
+              "Cursaron" NO se compara entre oficial y recalculado: en Supabase los 777
+              participantes de la cohorte tienen fila de enrollment en los 7 cursos por
+              construcción (import en bloque), así que ese número siempre da 777 y no refleja
+              participación real curso por curso — solo Q10 sabe quién genuinamente intentó
+              cada curso. En su lugar, "Cursando ahora" muestra cuántos activos siguen por
+              debajo de 80% en ESE curso puntual (2026-07-23, a pedido de Samuel). */}
+          {esActual && programa === 'jc' && aprobacionAjustadaProg.length > 0 && (
+            <Seccion
+              titulo="Verificación cruzada: aprobación oficial vs. recalculada"
+              nota="Aprobados compara aprobacion_cursos (pipeline oficial de Q10) contra un recálculo directo desde Supabase (enrollments + en_seguimiento_jc). 'Revisar' en cursos tempranos de la ruta (Bienvenida, Habilidades, Hackea, Emprendimiento) suele ser normal: Supabase solo tiene a los 777 participantes vigentes al momento del último sync, mientras Q10 ya trae 832 (760 activos + 74 retirados oficiales acumulados) — ~55 retiros antiguos nunca se cargaron en Supabase, así que el recálculo los sub-cuenta en los cursos que sí alcanzaron a completar antes de irse. Un 'Revisar' inesperado en un curso tardío (Lógica, IA) sí amerita revisar el sync. Cursando ahora = activos con avance <80% en ese curso puntual (no comparable con Q10: no reemplaza el conteo oficial de quién intentó cada curso)."
+            >
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-500 border-b border-slate-200">
+                      <th className="py-2 pr-4">Curso</th>
+                      <th className="py-2 pr-4 text-right">Cursaron (oficial)</th>
+                      <th className="py-2 pr-4 text-right">Cursando ahora (recalculado)</th>
+                      <th className="py-2 pr-4 text-right">Aprobados (oficial)</th>
+                      <th className="py-2 pr-4 text-right">Aprobados (recalculado)</th>
+                      <th className="py-2 text-right">¿Coincide aprobados?</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aprobacionAjustadaProg.map((aj) => {
+                      const norm = (s: string) => s.trim().toUpperCase();
+                      const of = aprobacionProg.find((a) => norm(a.curso) === norm(aj.curso));
+                      const aprobOf = of ? (of.aprobados_total ?? of.aprobados + of.aprobados_retirados) : null;
+                      const aprobAj = aj.aprobados_total ?? aj.aprobados + aj.aprobados_retirados;
+                      const cursandoAhora = (aj.banda_0_25 ?? 0) + (aj.banda_26_80 ?? 0);
+                      const coincide = of ? aprobOf === aprobAj : false;
+                      return (
+                        <tr key={aj.curso} className="border-b border-slate-100">
+                          <td className="py-2 pr-4">{aj.curso}</td>
+                          <td className="py-2 pr-4 text-right">{of?.cursaron ?? '—'}</td>
+                          <td className="py-2 pr-4 text-right">{cursandoAhora}</td>
+                          <td className="py-2 pr-4 text-right">{aprobOf ?? '—'}</td>
+                          <td className="py-2 pr-4 text-right">{aprobAj}</td>
+                          <td className="py-2 text-right">
+                            {coincide ? (
+                              <span className="font-medium" style={{ color: C.verde }}>Sí</span>
+                            ) : (
+                              <span className="font-medium" style={{ color: C.rojo }}>Revisar</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </Seccion>
           )}
         </>
@@ -1282,134 +1466,6 @@ export default function Pagina() {
         </>
       )}
 
-      {tab === 'Emoflow' && (
-        programa === 'mr' ? (
-          <NoAplica motivo="Mujeres ROFÉ no usa la plataforma Emoflow (0 matrículas en la fuente)." />
-        ) : !esActual ? (
-          <NoAplica motivo="Emoflow es un acumulado en tiempo real — no tiene series por cohorte histórica." />
-        ) : emoflowKpis ? (
-          <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              <Kpi
-                titulo={ciudadElegida ? `Estudiantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : `Estudiantes con Emoflow (${ETIQUETA_ESTADO[estado]})`}
-                valor={emoflowKpis.participantes.toLocaleString('es-CO')}
-                detalle={
-                  ciudadElegida || kpis.cifraEstado == null
-                    ? undefined
-                    : `de ${kpis.cifraEstado.toLocaleString('es-CO')} ${ETIQUETA_ESTADO[estado].toLowerCase()} (${Math.round((emoflowKpis.participantes / Math.max(kpis.cifraEstado, 1)) * 100)}%)`
-                }
-              />
-              <Kpi
-                titulo="Ingresos promedio"
-                valor={emoflowKpis.promedio.toFixed(1)}
-                detalle={`mediana ${emoflowKpis.mediana}`}
-              />
-              <Kpi
-                titulo="Activos últimos 7 días"
-                valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)}%` : '—'}
-                detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} estudiantes`}
-              />
-              <Kpi
-                titulo="Sin entrar hace +30 días"
-                valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.inactivos30 / emoflowKpis.participantes) * 100)}%` : '—'}
-                detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} estudiantes`}
-              />
-            </div>
-
-            <div className="grid md:grid-cols-2 gap-6">
-              <Seccion
-                titulo="Distribución de uso"
-                nota={`Ingresos = veces que el estudiante entró al sistema (acumulado). ${ETIQUETA_ESTADO[estado]}.`}>
-                <GraficoBarras
-                  datos={emoflowBandas}
-                  dataKey="participantes"
-                  nombre="Estudiantes"
-                  color={C.azul2}
-                />
-              </Seccion>
-
-              <Seccion
-                titulo="¿El que más entra, aprueba más?"
-                nota="% de aprobación de cada banda de uso.">
-                <GraficoBarras
-                  datos={emoflowBandas}
-                  dataKey="pct_aprobacion"
-                  nombre="Aprobación %"
-                  color={C.verde}
-                  dominioMax={100}
-                />
-                <p className="text-xs text-slate-400 mt-2">
-                  La relación es real pero suave: quienes menos entran aprueban menos que quienes más
-                  entran. Sirve para detectar el extremo bajo, no como predictor fino.
-                </p>
-              </Seccion>
-            </div>
-
-            {!ciudadElegida && (
-              <Seccion titulo="Uso por ciudad" nota="Promedio de ingresos al sistema por grupo operativo.">
-                <GraficoBarras
-                  datos={emoflowCiudades}
-                  dataKey="ingresos_promedio"
-                  nombre="Ingresos promedio"
-                  color={C.naranja}
-                  rotarEtiquetas
-                />
-              </Seccion>
-            )}
-
-            {!ciudadElegida && datos.historialEmoflow.length > 0 && (
-              <Seccion
-                titulo="Evolución de ingresos al sistema"
-                nota={datos.historialEmoflow.length < 3
-                  ? `Serie nueva — arrancó el ${datos.historialEmoflow[0].fecha}, crece un punto por día con el sync automático. Con pocos días el gráfico se ve casi plano; se vuelve útil a medida que se acumulan semanas.`
-                  : 'Promedio nacional de ingresos al sistema (acumulado, universo "Todos"), un punto por día del sync automático.'}
-              >
-                <GraficoHistorial
-                  historial={datos.historialEmoflow.map((h) => ({
-                    fecha: h.fecha,
-                    curso: 'Ingresos promedio',
-                    valor: h.ingresos_promedio != null ? Number(h.ingresos_promedio) : null,
-                  }))}
-                  metrica="ingresos_promedio"
-                  nombreMetrica="Ingresos promedio"
-                />
-              </Seccion>
-            )}
-
-            {!ciudadElegida && participacionUltima.datos.length > 0 && (
-              <Seccion
-                titulo={`% de participación — Semana ${participacionUltima.semana ?? '—'}`}
-                nota={`Completado / Real de la encuesta semanal Emoflow por ciudad (corte ${participacionUltima.fecha}). Distinto de "ingresos al sistema": aquí se mide si diligenciaron el formulario de esa semana.`}
-              >
-                <GraficoBarras
-                  datos={participacionUltima.datos}
-                  dataKey="avance_pct"
-                  nombre="Participación %"
-                  color={C.azul3}
-                  dominioMax={100}
-                  rotarEtiquetas
-                />
-              </Seccion>
-            )}
-
-            {!ciudadElegida && participacionEvolucion.length > 0 && (
-              <Seccion
-                titulo="Evolución de la participación semanal"
-                nota='Check-ins registrados por ciudad y semana (Semana 1 en adelante). La última semana es la que está en curso, por eso aparece más baja. Fuente: registro semanal Emoflow.'
-              >
-                <GraficoHistorial
-                  historial={participacionEvolucion}
-                  metrica="completado"
-                  nombreMetrica="Check-ins"
-                />
-              </Seccion>
-            )}
-          </>
-        ) : (
-          <NoAplica motivo="sin datos de Emoflow para esta selección." suave />
-        )
-      )}
-
       {tab === 'Asistencia' && (() => {
         const filas = pubAsistenciaFiltrada;
         if (filas.length === 0) {
@@ -1458,6 +1514,189 @@ export default function Pagina() {
           </>
         );
       })()}
+      {tab === 'Emoflow' && programa === 'jc' && (
+        <>
+          {/* Toggle de alcance. El CSV de Emoflow arrastra el histórico completo (827): además
+              de los estudiantes vigentes trae 17 en retiro probable y 68 que nunca llegaron a
+              matricularse en Q10 (postulantes / retirados de años anteriores). Por defecto se
+              muestra el universo canónico (742) para que este bloque cuadre con el resto del
+              panel; "Todos" permite ver la foto histórica completa. */}
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <div className="flex gap-1 tarjeta-glass p-1 w-fit">
+              {([['canonico', 'Solo estudiantes actuales'], ['todos', 'Todos (histórico)']] as const).map(
+                ([a, txt]) => (
+                  <button
+                    key={a}
+                    onClick={() => setAlcanceEmoflow(a)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                      alcanceEmoflow === a
+                        ? 'pill-metal pill-metal-azul'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {txt}
+                  </button>
+                ),
+              )}
+            </div>
+            <p className="text-xs text-slate-500 max-w-xl">
+              {alcanceEmoflow === 'canonico'
+                ? 'Solo estudiantes vigentes según la pestaña Seguimiento — coherente con el resto del panel.'
+                : 'Universo histórico completo del CSV de Emoflow: suma personas en retiro probable y usuarios que nunca se matricularon en Q10.'}
+            </p>
+          </div>
+
+          {emoflowKpis ? (
+            <>
+              {/* Resumen en palabras — el reporte diario, generado solo */}
+              {narrativaEmoflow && (
+                <motion.div
+                  initial={{ opacity: 0, y: 14 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.5 }}
+                  className="tarjeta-glass p-4 mb-5 border-l-4 border-rofe-azul"
+                >
+                  <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">
+                    Resumen de hoy
+                    {fechaCortaEs(datos.emoflowResumen?.[0]?.fecha_corte)
+                      ? ` · ${fechaCortaEs(datos.emoflowResumen[0].fecha_corte)}`
+                      : ''}
+                  </p>
+                  <p className="text-sm md:text-base text-slate-700 leading-relaxed">{narrativaEmoflow}</p>
+                </motion.div>
+              )}
+
+              {/* KPIs con significado, no plomería */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <Kpi
+                  titulo={ciudadElegida ? `Estudiantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : 'Estudiantes con Emoflow'}
+                  valor={emoflowKpis.participantes.toLocaleString('es-CO')}
+                  detalle={
+                    ciudadElegida
+                      ? undefined
+                      : alcanceEmoflow === 'canonico'
+                        ? 'matriculados y vigentes en Seguimiento'
+                        : `${(datos.emoflowResumen?.[0]?.con_match_supabase ?? 0).toLocaleString('es-CO')} cruzan con nuestra cohorte`
+                  }
+                />
+                <Kpi
+                  titulo="Activos (últimos 7 días)"
+                  valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)}%` : '—'}
+                  detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} estudiantes`}
+                />
+                <Kpi
+                  titulo="En riesgo de abandono"
+                  valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.inactivos30 / emoflowKpis.participantes) * 100)}%` : '—'}
+                  detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} sin entrar +30 días`}
+                />
+                <Kpi
+                  titulo="Usar Emoflow → aprobar (Q10)"
+                  valor={correlacion ? `${correlacion.max.toFixed(0)}%` : '—'}
+                  detalle={correlacion ? `vs ${correlacion.min.toFixed(0)}% de los que menos entran` : 'aprobación (Q10) de quienes más entran'}
+                />
+              </div>
+
+              {/* Insight elevado: participar → aprender */}
+              <div className="grid md:grid-cols-2 gap-6">
+                <Seccion
+                  titulo="Distribución de uso"
+                  nota={`Cuántas veces entró cada estudiante al sistema (acumulado). Cubre ${emoflowBandas.reduce((s, b) => s + b.participantes, 0).toLocaleString('es-CO')} estudiantes con actividad.`}
+                >
+                  <GraficoBarras
+                    datos={emoflowBandas}
+                    dataKey="participantes"
+                    nombre="Estudiantes"
+                    color={C.azul2}
+                  />
+                </Seccion>
+
+                <Seccion
+                  titulo="¿El que más entra a Emoflow, aprueba más? (cruce con Q10)"
+                  nota="Cruce: uso de Emoflow (eje de bandas) vs % de aprobación de los cursos, que viene de Q10 — no de Emoflow.">
+                  <GraficoBarras
+                    datos={emoflowBandas}
+                    dataKey="pct_aprobacion"
+                    nombre="Aprobación % (Q10)"
+                    color={C.verde}
+                    dominioMax={100}
+                  />
+                  {correlacion && (
+                    <p className="text-xs text-slate-500 mt-2">
+                      <b>Sí, y es medible:</b> quienes menos entran a Emoflow aprueban ~{correlacion.min.toFixed(0)}% y
+                      quienes más entran ~{correlacion.max.toFixed(0)}% (aprobación de Q10). Usar Emoflow es señal
+                      temprana de que el estudiante va bien — sirve para detectar a tiempo a quien se está quedando.
+                    </p>
+                  )}
+                </Seccion>
+              </div>
+
+              {!ciudadElegida && (
+                <Seccion titulo="Uso por ciudad" nota="Promedio de ingresos al sistema por grupo operativo.">
+                  <GraficoBarras
+                    datos={emoflowCiudades}
+                    dataKey="ingresos_promedio"
+                    nombre="Ingresos promedio"
+                    color={C.naranja}
+                    rotarEtiquetas
+                  />
+                </Seccion>
+              )}
+
+              {/* Evolución diaria REAL de ingresos — nacional o de la ciudad elegida */}
+              {evolucionDiaria.length > 0 && (
+                <Seccion
+                  titulo={ciudadElegida
+                    ? `Evolución de ingresos — ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}`
+                    : 'Evolución de ingresos al sistema'}
+                  nota="Usuarios activos = personas distintas que entraron ese día. Ingresos = total de registros de emoción (una persona genera varios en un día). Serie real desde los timestamps de Emoflow — arranca el 18 de marzo.">
+                  <GraficoHistorial
+                    historial={evolucionDiaria}
+                    metrica="ingresos"
+                    nombreMetrica="Ingresos"
+                  />
+                </Seccion>
+              )}
+
+              {/* % de matrícula activa por ciudad — última semana COMPLETA. Directo de Emoflow. */}
+              {!ciudadElegida && actividadSemanalUltima.datos.length > 0 && (
+                <Seccion
+                  titulo={`% de matrícula activa — semana del ${actividadSemanalUltima.semana ?? '—'}`}
+                  nota="Personas distintas que entraron a Emoflow esa semana ÷ matrícula Emoflow de la ciudad. Última semana completa (la semana en curso se excluye por estar empezando). Directo del CSV de Emoflow."
+                >
+                  <GraficoBarras
+                    datos={actividadSemanalUltima.datos}
+                    dataKey="pct_activos"
+                    nombre="% activos"
+                    color={C.azul3}
+                    dominioMax={100}
+                    rotarEtiquetas
+                  />
+                </Seccion>
+              )}
+
+              {!ciudadElegida && actividadSemanalEvolucion.length > 0 && (
+                <Seccion
+                  titulo="Evolución semanal de la actividad en Emoflow"
+                  nota="% de la matrícula Emoflow activa por semana, por ciudad. Una marca por semana completa (eje X = lunes de cada semana). La semana en curso se muestra solo cuando termina, para no comparar días sueltos contra semanas completas. Directo del CSV de Emoflow."
+                >
+                  <GraficoHistorial
+                    historial={actividadSemanalEvolucion}
+                    metrica="pct_activos"
+                    nombreMetrica="% activos"
+                  />
+                </Seccion>
+              )}
+            </>
+          ) : (
+            <Seccion titulo="Emoflow">
+              <p className="text-sm text-slate-500">Sin datos de Emoflow para esta selección.</p>
+            </Seccion>
+          )}
+        </>
+      )}
+      {tab === 'Emoflow' && programa === 'mr' && (
+        <NoAplica motivo="Mujeres ROFÉ no usa la plataforma Emoflow (0 matrículas en la fuente)." />
+      )}
       </div>
     </>
   );
