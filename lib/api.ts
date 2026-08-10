@@ -8,6 +8,14 @@ const ANON_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtieHB0b293dG50ZWZsaHJmd2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzU4MDUsImV4cCI6MjA5OTIxMTgwNX0.xfj_GJYdRgPHUCpyxReKm7G7SMGTVn4oscDhakV6DSo';
 
+// Webhook n8n (workflow `rerun-dispatcher`, vía ngrok) para forzar el ETL manualmente desde el
+// panel. La URL NO es secreta. La clave (header `x-rerun-key`) NUNCA se guarda aquí ni en el
+// bundle: la escribe el usuario y vive solo en localStorage (ver components/BotonActualizar.tsx).
+// Overridable por env en build.
+export const WEBHOOK_RERUN =
+  process.env.NEXT_PUBLIC_WEBHOOK_RERUN ??
+  'https://ergonomic-absinthe-refract.ngrok-free.dev/webhook/rerun-pipeline';
+
 async function leer<T>(recurso: string): Promise<T[]> {
   const resp = await fetch(`${URL_BASE}/rest/v1/${recurso}`, {
     headers: { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` },

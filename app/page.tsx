@@ -24,6 +24,7 @@ import {
 import { motion } from 'framer-motion';
 import { Hero } from '@/components/efectos/Hero';
 import { BackgroundPaths } from '@/components/efectos/BackgroundPaths';
+import { BotonActualizar } from '@/components/BotonActualizar';
 
 type Programa = 'jc' | 'mr';
 // Todas las secciones están siempre disponibles (rediseño 2026-08-03): cada tab decide
@@ -854,17 +855,23 @@ export default function Pagina() {
         id="panel"
         className={`max-w-[1600px] mx-auto px-4 py-8 scroll-mt-20 ${programa === 'mr' ? 'tema-mr' : ''}`}
       >
-      {frescuraResumen && (
-        <p
-          className={`text-xs mb-3 ${
-            frescuraResumen.vencido ? 'text-rofe-rojo font-semibold' : 'text-slate-400'
-          }`}
-        >
-          {frescuraResumen.vencido ? '⚠ ' : ''}
-          Datos actualizados hace {frescuraResumen.horas.toFixed(1)} h
-          {frescuraResumen.vencido ? ' — puede que el sync nocturno no haya corrido' : ''}
-        </p>
-      )}
+      {/* Frescura del dato + botón para forzar el ETL de n8n bajo demanda (ver BotonActualizar). */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mb-3">
+        {frescuraResumen && (
+          <p
+            className={`text-xs ${
+              frescuraResumen.vencido ? 'text-rofe-rojo font-semibold' : 'text-slate-400'
+            }`}
+          >
+            {frescuraResumen.vencido ? '⚠ ' : ''}
+            Datos actualizados hace {frescuraResumen.horas.toFixed(1)} h
+            {frescuraResumen.vencido ? ' — puede que el sync nocturno no haya corrido' : ''}
+          </p>
+        )}
+        <BotonActualizar
+          onDone={() => cargarTodo().then(setDatos).catch((e) => setError(String(e)))}
+        />
+      </div>
       {/* Selector de programa */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex gap-1 tarjeta-glass p-1">
