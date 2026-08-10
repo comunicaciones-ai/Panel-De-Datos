@@ -1207,7 +1207,7 @@ export default function Pagina() {
           {esActual && programa === 'jc' && aprobacionAjustadaProg.length > 0 && (
             <Seccion
               titulo="Verificación cruzada: aprobación oficial vs. recalculada"
-              nota="Aprobados compara aprobacion_cursos (pipeline oficial de Q10) contra un recálculo directo desde Supabase (enrollments + en_seguimiento_jc). 'Revisar' en cursos tempranos de la ruta (Bienvenida, Habilidades, Hackea, Emprendimiento) suele ser normal: Supabase solo tiene a los 777 participantes vigentes al momento del último sync, mientras Q10 ya trae 832 (760 activos + 74 retirados oficiales acumulados) — ~55 retiros antiguos nunca se cargaron en Supabase, así que el recálculo los sub-cuenta en los cursos que sí alcanzaron a completar antes de irse. Un 'Revisar' inesperado en un curso tardío (Lógica, IA) sí amerita revisar el sync. Cursando ahora = activos con avance <80% en ese curso puntual (no comparable con Q10: no reemplaza el conteo oficial de quién intentó cada curso)."
+              nota="Compara APROBADOS ACTIVOS (mismo universo) entre aprobacion_cursos (pipeline oficial de Q10) y un recálculo directo desde Supabase (enrollments + en_seguimiento_jc). Antes comparaba los totales con retirados y siempre daba 'Revisar', porque la cohorte oficial (832) incluye ~55 retiros antiguos que Supabase nunca carga como filas — ese hueco es estructural, no un error, así que ya no se compara. La población activa tampoco es idéntica (oficial ≈ 754 de cohorte_ingresos vs recálculo ≈ 751 de en_seguimiento_jc); esa pequeña brecha se tolera. Ahora 'Revisar' significa un descuadre REAL (p. ej. el sync de aprobación quedó atrasado, como pasó el 2026-07-23) y sí amerita mirarlo. 'Cursaron (oficial)' = cohorte completa 832, de referencia (no se compara). 'Cursando ahora' = activos con avance <80% en ese curso puntual."
             >
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -1216,8 +1216,8 @@ export default function Pagina() {
                       <th className="py-2 pr-4">Curso</th>
                       <th className="py-2 pr-4 text-right">Cursaron (oficial)</th>
                       <th className="py-2 pr-4 text-right">Cursando ahora (recalculado)</th>
-                      <th className="py-2 pr-4 text-right">Aprobados (oficial)</th>
-                      <th className="py-2 pr-4 text-right">Aprobados (recalculado)</th>
+                      <th className="py-2 pr-4 text-right">Aprobados activos (oficial)</th>
+                      <th className="py-2 pr-4 text-right">Aprobados activos (recalculado)</th>
                       <th className="py-2 text-right">¿Coincide aprobados?</th>
                     </tr>
                   </thead>
@@ -1225,17 +1225,27 @@ export default function Pagina() {
                     {aprobacionAjustadaProg.map((aj) => {
                       const norm = (s: string) => s.trim().toUpperCase();
                       const of = aprobacionProg.find((a) => norm(a.curso) === norm(aj.curso));
-                      const aprobOf = of ? (of.aprobados_total ?? of.aprobados + of.aprobados_retirados) : null;
-                      const aprobAj = aj.aprobados_total ?? aj.aprobados + aj.aprobados_retirados;
+                      // Comparar APROBADOS ACTIVOS (mismo universo), NO aprobados_total: la cohorte
+                      // oficial (832) incluye ~55 retirados que Supabase nunca carga como filas, así
+                      // que los totales JAMÁS cuadran (era el falso "Revisar" en todos los cursos).
+                      // El universo activo tampoco es idéntico (oficial = cohorte_ingresos.activos ≈
+                      // 754; recálculo = en_seguimiento_jc ≈ 751), así que se tolera esa brecha:
+                      // "Revisar" solo si los aprobados difieren MÁS de lo que difieren las
+                      // poblaciones activas (señal real de sync atrasado), +2 de ruido.
+                      const aprobActOf = of ? of.aprobados : null;
+                      const aprobActAj = aj.aprobados;
+                      const brechaActivos = of ? Math.abs(of.activos - aj.activos) : 0;
                       const cursandoAhora = (aj.banda_0_25 ?? 0) + (aj.banda_26_80 ?? 0);
-                      const coincide = of ? aprobOf === aprobAj : false;
+                      const coincide = of && aprobActOf !== null
+                        ? Math.abs(aprobActOf - aprobActAj) <= brechaActivos + 2
+                        : false;
                       return (
                         <tr key={aj.curso} className="border-b border-slate-100">
                           <td className="py-2 pr-4">{aj.curso}</td>
                           <td className="py-2 pr-4 text-right">{of?.cursaron ?? '—'}</td>
                           <td className="py-2 pr-4 text-right">{cursandoAhora}</td>
-                          <td className="py-2 pr-4 text-right">{aprobOf ?? '—'}</td>
-                          <td className="py-2 pr-4 text-right">{aprobAj}</td>
+                          <td className="py-2 pr-4 text-right">{aprobActOf ?? '—'}</td>
+                          <td className="py-2 pr-4 text-right">{aprobActAj}</td>
                           <td className="py-2 text-right">
                             {coincide ? (
                               <span className="font-medium" style={{ color: C.verde }}>Sí</span>
