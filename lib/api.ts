@@ -280,6 +280,64 @@ export interface Frescura {
   vencido: boolean;
 }
 
+// ---------------------------------------------------------------------------------------
+// Fase 1/2 del rediseño (plan-rediseno-panel-datos-2026-07-30.md, migración 037): backend
+// del filtro global "Estado" (Activos/Todos/Retirados). Interfaces + llamadas nuevas.
+// Las llamadas viejas (v_demografia_grupo, v_mr_demografia, v_edad_distribucion,
+// v_emprendimiento_*) se mantienen SIN TOCAR hasta confirmar que las nuevas cuadran exacto
+// (mismo principio de verificación cruzada usado con v_pub_avance, que encontró una vista
+// duplicada — ver 036_fix_v_pub_avance_duplicado.sql). Todavía no se consumen desde
+// app/page.tsx — eso es Fase 3.
+// ---------------------------------------------------------------------------------------
+
+// v_pub_demografia: formato LARGO (no una columna por dimensión) — decisión de diseño de la
+// Fase 1: cruzar género×edad×estrato×civil×estudio×vivienda por persona rompía el criterio
+// de k-anonimato (n<5) que ya usa v_demografia_grupo/v_pub_geografia. `total=null` = celda
+// suprimida. Hasta 2026-08-05, estrato/estado_civil/nivel_estudio/tipo_vivienda solo traían
+// filas para MR (JC no tenía ese dato capturado en Supabase) — desde 2026-08-06 JC también
+// las tiene (ver docs/procesos/demografia-historica-jc.md en el repo admin-usable). La
+// ausencia total de filas para un programa sigue siendo la señal de "no aplica" en el
+// frontend, pero ya no se asume por programa — se decide con los datos reales que llegan.
+export interface PubDemografia {
+  programa: 'jc' | 'mr' | 'stand';
+  cohorte: string;
+  estado: 'activo' | 'retirado';
+  grupo_ciudad: string | null;
+  dimension:
+    | 'genero'
+    | 'edad_rango'
+    | 'estrato'
+    | 'estado_civil'
+    | 'nivel_estudio'
+    | 'tipo_vivienda';
+  categoria: string;
+  total: number | null;
+}
+
+// v_pub_emprendimiento: solo JC tiene filas (situacion_emprendimiento es NULL en MR) — la
+// ausencia total de filas programa=mr ES el "no aplica".
+export interface PubEmprendimiento {
+  programa: 'jc' | 'mr' | 'stand';
+  cohorte: string;
+  estado: 'activo' | 'retirado';
+  grupo_ciudad: string | null;
+  situacion: string;
+  total: number | null;
+  prom_cursos_completados: number | string | null;
+  prom_avance: number | string | null;
+}
+
+// v_pub_asistencia: primera exposición pública de asistencia_promedio (antes solo PII vía
+// panel_riesgo_gui.py). Cruce por email, mismo patrón que v_persona_360.
+export interface PubAsistencia {
+  programa: 'jc' | 'mr' | 'stand';
+  cohorte: string;
+  estado: 'activo' | 'retirado';
+  grupo_ciudad: string | null;
+  promedio: number | string | null;
+  n_estudiantes: number | null;
+}
+
 export interface Datos {
   cohorte: CohorteStats[];
   cursos: CursoCompletion[];
@@ -306,10 +364,25 @@ export interface Datos {
   emoflowParticipacion: EmoflowParticipacionSemanal[];
   geografiaMunicipio: GeografiaMunicipio[];
   frescura: Frescura[];
+  // Fase 1/2 del rediseño (037) — ver sección de interfaces arriba.
+  pubDemografia: PubDemografia[];
+  pubEmprendimiento: PubEmprendimiento[];
+  pubAsistencia: PubAsistencia[];
+  // Trío del filtro "Estado" para Emoflow: Activos=canonico (migración 011, ya existía sin
+  // wiring), Todos=emoflowResumen/PorCiudad/Bandas/BandasCiudad (arriba, sin sufijo),
+  // Retirados=retirado (migración 037).
+  emoflowResumenCanonico: EmoflowResumen[];
+  emoflowPorCiudadCanonico: EmoflowPorCiudad[];
+  emoflowBandasCanonico: EmoflowBanda[];
+  emoflowBandasCiudadCanonico: EmoflowBandaCiudad[];
+  emoflowResumenRetirado: EmoflowResumen[];
+  emoflowPorCiudadRetirado: EmoflowPorCiudad[];
+  emoflowBandasRetirado: EmoflowBanda[];
+  emoflowBandasCiudadRetirado: EmoflowBandaCiudad[];
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, geografiaMunicipio, frescura] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -336,8 +409,19 @@ export async function cargarTodo(): Promise<Datos> {
       leer<EmoflowParticipacionSemanal>('emoflow_participacion_semanal?order=fecha_corte.asc'),
       leer<GeografiaMunicipio>('v_pub_geografia?order=personas.desc'),
       leer<Frescura>('v_frescura'),
+      leer<PubDemografia>('v_pub_demografia'),
+      leer<PubEmprendimiento>('v_pub_emprendimiento'),
+      leer<PubAsistencia>('v_pub_asistencia'),
+      leer<EmoflowResumen>('v_emoflow_resumen_canonico'),
+      leer<EmoflowPorCiudad>('v_emoflow_por_ciudad_canonico?order=participantes.desc'),
+      leer<EmoflowBanda>('v_emoflow_bandas_canonico?order=orden.asc'),
+      leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad_canonico?order=orden.asc'),
+      leer<EmoflowResumen>('v_emoflow_resumen_retirado'),
+      leer<EmoflowPorCiudad>('v_emoflow_por_ciudad_retirado?order=participantes.desc'),
+      leer<EmoflowBanda>('v_emoflow_bandas_retirado?order=orden.asc'),
+      leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad_retirado?order=orden.asc'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, geografiaMunicipio, frescura };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, emoflowParticipacion, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {

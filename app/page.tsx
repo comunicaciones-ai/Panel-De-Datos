@@ -4,6 +4,8 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   cargarTodo,
   Datos,
+  PubDemografia,
+  PubEmprendimiento,
   ETIQUETA_GRUPO,
   ETIQUETA_MR,
   ETIQUETA_SITUACION,
@@ -16,7 +18,6 @@ import {
   GraficoAprobacion,
   GraficoBarras,
   GraficoCursos,
-  GraficoDemografia,
   GraficoEmprendimiento,
   GraficoHistorial,
 } from '@/components/graficos';
@@ -25,29 +26,57 @@ import { Hero } from '@/components/efectos/Hero';
 import { BackgroundPaths } from '@/components/efectos/BackgroundPaths';
 
 type Programa = 'jc' | 'mr';
-type Tab = 'Resumen' | 'Cursos' | 'Historial' | 'Emprendimiento' | 'Demografía' | 'Emoflow';
-type Ciudad = string | null;
+// Todas las secciones están siempre disponibles (rediseño 2026-08-03): cada tab decide
+// internamente si tiene algo que mostrar o si debe explicar "No aplica" — ya no se ocultan
+// tabs según programa/cohorte (ver §1.4 y §2.2 de plan-rediseno-panel-datos-2026-07-30.md).
+type Tab = 'Resumen' | 'Cursos' | 'Demografía' | 'Historial' | 'Emprendimiento' | 'Emoflow' | 'Asistencia';
+const TABS: Tab[] = ['Resumen', 'Cursos', 'Demografía', 'Historial', 'Emprendimiento', 'Emoflow', 'Asistencia'];
 
-// La cohorte "actual" NO va hardcodeada: es la mayor presente en los datos, así el
-// cambio de año no requiere tocar el frontend (el ETL escribe la cohorte nueva y listo).
-// Emprendimiento (encuesta diagnóstico) es solo JC; Demografía existe para ambos
-// programas con fuentes distintas (JC: BD monitorias · MR: BD-Mujeres ROFÉ, vista
-// v_mr_demografia). El Historial (serie diaria) arranca en la cohorte 2026.
-// Cohortes pasadas (importadas de Q10): Resumen + Cursos.
-// Emoflow (ingresos al sistema) es solo JC —0 matrículas MR en la fuente— y solo cohorte
-// actual: la pestaña de origen no tiene dimensión de cohorte.
-function tabsDisponibles(programa: Programa, esActual: boolean): Tab[] {
-  if (!esActual) return ['Resumen', 'Cursos'];
-  return programa === 'jc'
-    ? ['Resumen', 'Cursos', 'Historial', 'Emprendimiento', 'Demografía', 'Emoflow']
-    : ['Resumen', 'Cursos', 'Historial', 'Demografía'];
-}
+// Filtro global "Estado" (migración 037): reemplaza la exposición pasiva de
+// activos/retirados por un control real que se propaga a Resumen, Cursos, Demografía,
+// Emprendimiento, Emoflow y Asistencia (Historial queda fuera — su fuente no tiene
+// dimensión de retiro, ver §3 del plan).
+type Estado = 'activos' | 'todos' | 'retirados';
+const ETIQUETA_ESTADO: Record<Estado, string> = { activos: 'Activos', todos: 'Todos', retirados: 'Retirados' };
+
+// Orden de despliegue de v_pub_demografia (dimension). Hasta 2026-08-05, estrato/estado_civil/
+// nivel_estudio/tipo_vivienda solo traían filas para MR (JC no tenía ese dato capturado). Desde
+// 2026-08-06, JC también las tiene (Mongo + archivo maestro + formularios Fase 1, ver
+// docs/procesos/demografia-historica-jc.md) — la tarjeta ya no asume "no aplica" por programa,
+// decide solo con si `v_pub_demografia` trae filas o no (`dimensionAplicaPrograma` abajo).
+const DIMENSIONES_DEMOGRAFIA = [
+  'genero',
+  'edad_rango',
+  'estrato',
+  'estado_civil',
+  'nivel_estudio',
+  'tipo_vivienda',
+] as const;
+
+const ETIQUETA_DIMENSION: Record<string, string> = {
+  genero: 'Género',
+  edad_rango: 'Distribución de edad',
+  estrato: 'Estrato socioeconómico',
+  estado_civil: 'Estado civil',
+  nivel_estudio: 'Nivel de estudios',
+  tipo_vivienda: 'Tipo de vivienda',
+};
+
+// Orden de edad para JC (v_pub_demografia no trae una columna de orden numérico para esta
+// dimensión — a diferencia de ORDEN_MR, que ya cubre el rango MR). Puramente de presentación,
+// no requiere SQL nuevo.
+const ORDEN_EDAD_JC = ['< 15', '15-17', '18-20', '21-24', '25+'];
 
 const COLOR_SITUACION: Record<string, string> = {
   en_marcha: C.verde,
   idea: C.azul2,
   interesado: C.amarillo,
   no_interesado: C.naranja,
+};
+
+const COLOR_GENERO: Record<string, string> = {
+  Femenino: C.naranja,
+  Masculino: C.azul2,
 };
 
 function Kpi({ titulo, valor, detalle }: { titulo: string; valor: string; detalle?: string }) {
@@ -101,20 +130,66 @@ function Seccion({ titulo, nota, children }: { titulo: string; nota?: string; ch
   );
 }
 
+// Tarjeta "No aplica" — regla dura del rediseño (§2.3): nunca desaparecer una sección o
+// mostrar 0%/vacío sin explicar por qué. Se usa tanto para incompatibilidades estructurales
+// (JC sin estrato, MR sin Emoflow) como, en un tono más suave, cuando el filtro vigente
+// simplemente no tiene datos todavía.
+function NoAplica({ motivo, suave = false }: { motivo: string; suave?: boolean }) {
+  return (
+    <div className="rounded-xl border border-dashed border-slate-300/70 bg-white/20 p-5 text-center">
+      <p className="text-sm text-slate-400">{suave ? 'Sin datos — ' : 'No aplica — '}{motivo}</p>
+    </div>
+  );
+}
+
+// Suma `total` (respeta null = celda suprimida por k-anonimato, se ignora en vez de contarla
+// como 0) por categoria, para una dimension de v_pub_demografia ya filtrada por
+// programa/cohorte/estado/ciudad.
+function agregarPorCategoria(filas: PubDemografia[], dimension: string) {
+  const mapa = new Map<string, number>();
+  filas
+    .filter((f) => f.dimension === dimension && f.total != null)
+    .forEach((f) => mapa.set(f.categoria, (mapa.get(f.categoria) ?? 0) + (f.total as number)));
+  return mapa;
+}
+
+// Agrega v_pub_emprendimiento (ya filtrada) por situación — promedios ponderados por `total`,
+// ignorando celdas suprimidas (total=null) en el peso.
+function agregarEmprendimiento(filas: PubEmprendimiento[]) {
+  const mapa = new Map<string, { total: number; sumaAvance: number; pesoAvance: number; sumaCursos: number; pesoCursos: number }>();
+  filas.forEach((f) => {
+    if (f.total == null) return;
+    const acc = mapa.get(f.situacion) ?? { total: 0, sumaAvance: 0, pesoAvance: 0, sumaCursos: 0, pesoCursos: 0 };
+    acc.total += f.total;
+    if (f.prom_avance != null) {
+      acc.sumaAvance += Number(f.prom_avance) * f.total;
+      acc.pesoAvance += f.total;
+    }
+    if (f.prom_cursos_completados != null) {
+      acc.sumaCursos += Number(f.prom_cursos_completados) * f.total;
+      acc.pesoCursos += f.total;
+    }
+    mapa.set(f.situacion, acc);
+  });
+  return mapa;
+}
+
 export default function Pagina() {
   const [datos, setDatos] = useState<Datos | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [programa, setPrograma] = useState<Programa>('jc');
   // null = "la cohorte actual" (se resuelve con los datos; no hardcodear el año)
   const [cohorteElegida, setCohorteElegida] = useState<string | null>(null);
-  const [ciudadElegida, setCiudadElegida] = useState<Ciudad>(null);
-  // Drill-down de municipio (v_pub_geografia) — independiente de ciudadElegida (que solo
-  // filtra JC hoy): cubre ambos programas, es donde vive la información nueva (municipios
-  // satélite de MR: Soacha, Jamundí, etc., con supresión n<5 ya aplicada en la vista).
-  const [grupoGeografia, setGrupoGeografia] = useState<string | null>(null);
+  const [estado, setEstado] = useState<Estado>('activos');
+  // Selector de ciudad/municipio UNIFICADO (§2.1.4): un solo control, basado en
+  // v_pub_geografia — cubre JC y MR (antes eran dos mecanismos: un selector de ciudad
+  // JC-only arriba + una sección "Geografía" aparte para ambos programas dentro de Resumen).
+  const [ciudadElegida, setCiudadElegida] = useState<string | null>(null); // grupo_ciudad
+  const [municipioElegido, setMunicipioElegido] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('Resumen');
-  // Unidad del desglose "Estado de la cohorte": matrículas (inscripciones) o estudiantes (personas)
-  const [unidadEstado, setUnidadEstado] = useState<'matriculas' | 'estudiantes'>('matriculas');
+  // Unidad del desglose "Estado de la cohorte": matrículas (inscripciones) o estudiantes (personas).
+  // Solo tiene sentido bajo Estado=Activos (v_cohorte_estudiantes* no distingue retirados).
+  const [unidadEstadoCohorte, setUnidadEstadoCohorte] = useState<'matriculas' | 'estudiantes'>('matriculas');
 
   useEffect(() => {
     cargarTodo().then(setDatos).catch((e) => setError(String(e)));
@@ -125,6 +200,12 @@ export default function Pagina() {
     document.body.classList.toggle('tema-mr-body', programa === 'mr');
     return () => document.body.classList.remove('tema-mr-body');
   }, [programa]);
+
+  // La vista "Por estudiantes" solo existe para activos — si el usuario cambia el filtro
+  // Estado a Todos/Retirados mientras estaba en esa vista, vuelve a "Por matrículas".
+  useEffect(() => {
+    if (estado !== 'activos' && unidadEstadoCohorte === 'estudiantes') setUnidadEstadoCohorte('matriculas');
+  }, [estado, unidadEstadoCohorte]);
 
   const cohortes = useMemo(
     () =>
@@ -137,19 +218,11 @@ export default function Pagina() {
   const cohorte = cohorteElegida ?? cohorteActual;
   const esActual = cohorte === cohorteActual && cohorte !== '';
 
-  const ciudades = useMemo(
-    () =>
-      datos
-        ? Array.from(new Set(datos.demografia.map((d) => d.grupo_ciudad))).sort()
-        : [],
-    [datos],
-  );
-
-  // Geografía por municipio (v_pub_geografia) — cubre jc y mr, a diferencia de `ciudades`
-  // arriba (solo JC, viene de v_demografia_grupo). No arrastrar el grupo elegido entre
-  // programas/cohortes distintos: puede no existir en el nuevo contexto.
+  // Geografía por municipio (v_pub_geografia) — fuente ÚNICA del selector de ciudad, cubre
+  // ambos programas (antes el selector de arriba solo existía para JC, vía v_demografia_grupo).
   useEffect(() => {
-    setGrupoGeografia(null);
+    setCiudadElegida(null);
+    setMunicipioElegido(null);
   }, [programa, cohorte]);
 
   const geografiaProg = useMemo(
@@ -172,13 +245,36 @@ export default function Pagina() {
 
   const municipiosGrupo = useMemo(
     () =>
-      grupoGeografia
+      ciudadElegida
         ? geografiaProg
-            .filter((g) => g.grupo_ciudad === grupoGeografia)
+            .filter((g) => g.grupo_ciudad === ciudadElegida)
             .sort((a, b) => b.personas - a.personas)
         : [],
-    [geografiaProg, grupoGeografia],
+    [geografiaProg, ciudadElegida],
   );
+
+  // Resumen de la selección de geografía vigente (grupo y, si se eligió, municipio) — usado
+  // para el KPI de participantes cuando hay ciudad elegida, y para el pill inline junto al
+  // selector. Reemplaza el statsProgramaPorCiudad viejo (JC-only) por una fuente que cubre
+  // ambos programas.
+  const geografiaFiltrada = useMemo(() => {
+    let filas = geografiaProg;
+    if (ciudadElegida) filas = filas.filter((g) => g.grupo_ciudad === ciudadElegida);
+    if (municipioElegido) filas = filas.filter((g) => g.municipio === municipioElegido);
+    return filas;
+  }, [geografiaProg, ciudadElegida, municipioElegido]);
+
+  const geografiaResumen = useMemo(() => {
+    if (geografiaFiltrada.length === 0) return null;
+    const personas = geografiaFiltrada.reduce((s, g) => s + (g.personas ?? 0), 0);
+    const aprobados = geografiaFiltrada.reduce((s, g) => s + (g.aprobados ?? 0), 0);
+    const sumaPond = geografiaFiltrada.reduce(
+      (s, g) => s + Number(g.avance_promedio ?? 0) * (g.personas ?? 0), 0,
+    );
+    return { personas, aprobados, avance: personas ? sumaPond / personas : null };
+  }, [geografiaFiltrada]);
+
+  const hayFiltroCiudad = ciudadElegida !== null;
 
   // Frescura del dato (v_frescura) — un número correcto sin fecha es tan engañoso como uno
   // equivocado. Prioriza los procesos que alimentan el Resumen (cohorte/aprobación/retiros);
@@ -200,16 +296,9 @@ export default function Pagina() {
     [datos, programa, cohorte],
   );
 
-  const participantesFiltrados = useMemo(
-    () => {
-      if (!datos || programa !== 'jc') return datos?.demografia ?? [];
-      if (!ciudadElegida) return datos.demografia;
-      return datos.demografia.filter((d) => d.grupo_ciudad === ciudadElegida);
-    },
-    [datos, programa, ciudadElegida],
-  );
-
-  // Cursos filtrados por ciudad (cuando se selecciona una ciudad en JC)
+  // Cursos filtrados por ciudad — v_curso_completion_por_ciudad sigue siendo JC-only (sin
+  // equivalente MR construido todavía). Con MR + ciudad elegida se degrada al total del
+  // programa (misma degradación honesta que antes tenía JC en cohortes sin datos).
   const cursosPorCiudadFiltrados = useMemo(
     () => {
       if (!datos || programa !== 'jc' || !ciudadElegida) return cursosProg;
@@ -221,39 +310,99 @@ export default function Pagina() {
     },
     [datos, programa, cohorte, ciudadElegida, cursosProg],
   );
+  const cursosPorCiudadDisponible = programa === 'jc';
 
   const historialProg = useMemo(
     () => (datos ? datos.historial.filter((h) => h.programa === programa) : []),
     [datos, programa],
   );
 
-  // Emprendimiento filtrado por ciudad (JC solamente)
-  const emprendimientoPorCiudad = useMemo(
-    () => {
-      if (!datos || programa !== 'jc' || !ciudadElegida) return datos?.emprendimiento ?? [];
-      return datos.emprendimientoPorCiudad?.filter((e) => e.grupo_ciudad === ciudadElegida) ?? [];
-    },
-    [datos, programa, ciudadElegida],
-  );
-
-  // Historial filtrado por ciudad. Serie propia (historial_cursos_ciudad), no el histórico
-  // nacional: este último nunca guardó la dimensión ciudad, así que no se puede desglosar.
+  // Historial filtrado por ciudad. Serie propia (historial_cursos_ciudad, JC-only), no el
+  // histórico nacional: este último nunca guardó la dimensión ciudad.
   const historialPorCiudad = useMemo(
     () => {
       if (!datos || programa !== 'jc' || !ciudadElegida) return [];
-      return (
-        datos.historialPorCiudad?.filter((h) => h.grupo_ciudad === ciudadElegida) ?? []
-      );
+      return datos.historialPorCiudad?.filter((h) => h.grupo_ciudad === ciudadElegida) ?? [];
     },
     [datos, programa, ciudadElegida],
   );
 
-  // Emoflow — KPIs. Sin ciudad: agregado nacional (v_emoflow_resumen). Con ciudad: la fila de
-  // esa ciudad. Mismo patrón "nacional vs *PorCiudad" del resto del panel.
+  // v_pub_demografia ya filtrada por programa/cohorte/estado/ciudad (§2.1.3: el filtro Estado
+  // se propaga aquí). "todos" = sumar activo+retirado; si no, filtra al estado elegido.
+  const pubDemografiaFiltrada = useMemo(() => {
+    if (!datos) return [];
+    return datos.pubDemografia.filter(
+      (d) =>
+        d.programa === programa &&
+        d.cohorte === cohorte &&
+        (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
+        (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
+    );
+  }, [datos, programa, cohorte, estado, ciudadElegida]);
+
+  // "No aplica" (estructural, por programa) vs. "sin datos" (el filtro vigente no tiene
+  // filas) para cada dimensión — se evalúa sobre TODO el dataset del programa, ignorando el
+  // filtro de cohorte/estado/ciudad vigente, para no confundir sparsity con incompatibilidad.
+  const dimensionAplicaPrograma = (dim: string) =>
+    !!datos && datos.pubDemografia.some((d) => d.programa === programa && d.dimension === dim);
+
+  const pubEmprendimientoFiltrada = useMemo(() => {
+    if (!datos) return [];
+    return datos.pubEmprendimiento.filter(
+      (d) =>
+        d.programa === programa &&
+        d.cohorte === cohorte &&
+        (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
+        (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
+    );
+  }, [datos, programa, cohorte, estado, ciudadElegida]);
+  const emprendimientoAplicaPrograma = !!datos && datos.pubEmprendimiento.some((d) => d.programa === programa);
+
+  const pubAsistenciaFiltrada = useMemo(() => {
+    if (!datos) return [];
+    return datos.pubAsistencia.filter(
+      (d) =>
+        d.programa === programa &&
+        d.cohorte === cohorte &&
+        (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
+        (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
+    );
+  }, [datos, programa, cohorte, estado, ciudadElegida]);
+
+  // Emoflow: trío del filtro Estado. Activos=_canonico (migración 011), Todos=vista original
+  // (sin sufijo), Retirados=_retirado (migración 037) — decisión de diseño de la Fase 1: no
+  // calcular "Retirados" como Todos-Activos en el frontend (no alinea bien el desglose por
+  // ciudad/banda).
+  const emoflowResumenSrc = useMemo(() => {
+    if (!datos) return [];
+    if (estado === 'activos') return datos.emoflowResumenCanonico;
+    if (estado === 'retirados') return datos.emoflowResumenRetirado;
+    return datos.emoflowResumen;
+  }, [datos, estado]);
+  const emoflowPorCiudadSrc = useMemo(() => {
+    if (!datos) return [];
+    if (estado === 'activos') return datos.emoflowPorCiudadCanonico;
+    if (estado === 'retirados') return datos.emoflowPorCiudadRetirado;
+    return datos.emoflowPorCiudad;
+  }, [datos, estado]);
+  const emoflowBandasSrc = useMemo(() => {
+    if (!datos) return [];
+    if (estado === 'activos') return datos.emoflowBandasCanonico;
+    if (estado === 'retirados') return datos.emoflowBandasRetirado;
+    return datos.emoflowBandas;
+  }, [datos, estado]);
+  const emoflowBandasCiudadSrc = useMemo(() => {
+    if (!datos) return [];
+    if (estado === 'activos') return datos.emoflowBandasCiudadCanonico;
+    if (estado === 'retirados') return datos.emoflowBandasCiudadRetirado;
+    return datos.emoflowBandasCiudad;
+  }, [datos, estado]);
+
+  // Emoflow — KPIs. Sin ciudad: agregado nacional. Con ciudad: la fila de esa ciudad (JC-only,
+  // Emoflow no tiene matrículas MR — ver "no aplica" del tab).
   const emoflowKpis = useMemo(() => {
-    if (!datos) return null;
     if (ciudadElegida) {
-      const c = datos.emoflowPorCiudad?.find((e) => e.grupo_ciudad === ciudadElegida);
+      const c = emoflowPorCiudadSrc?.find((e) => e.grupo_ciudad === ciudadElegida);
       if (!c) return null;
       return {
         participantes: c.participantes,
@@ -263,7 +412,7 @@ export default function Pagina() {
         inactivos30: c.inactivos_30d,
       };
     }
-    const r = datos.emoflowResumen?.[0];
+    const r = emoflowResumenSrc?.[0];
     if (!r) return null;
     return {
       participantes: r.participantes,
@@ -272,15 +421,12 @@ export default function Pagina() {
       activos7: r.activos_7d,
       inactivos30: r.inactivos_30d,
     };
-  }, [datos, ciudadElegida]);
+  }, [emoflowResumenSrc, emoflowPorCiudadSrc, ciudadElegida]);
 
-  // Emoflow — bandas de uso. Con ciudad elegida hay que usar la vista desglosada: mostrar las
-  // bandas nacionales dentro de una vista de ciudad sería mezclar universos.
   const emoflowBandas = useMemo(() => {
-    if (!datos) return [];
     const filas = ciudadElegida
-      ? (datos.emoflowBandasCiudad ?? []).filter((b) => b.grupo_ciudad === ciudadElegida)
-      : (datos.emoflowBandas ?? []);
+      ? (emoflowBandasCiudadSrc ?? []).filter((b) => b.grupo_ciudad === ciudadElegida)
+      : (emoflowBandasSrc ?? []);
     return [...filas]
       .sort((a, b) => a.orden - b.orden)
       .map((b) => ({
@@ -288,20 +434,18 @@ export default function Pagina() {
         participantes: b.participantes,
         pct_aprobacion: Number(b.pct_aprobacion ?? 0),
       }));
-  }, [datos, ciudadElegida]);
+  }, [emoflowBandasSrc, emoflowBandasCiudadSrc, ciudadElegida]);
 
-  // Uso por ciudad — solo tiene sentido en la vista nacional (con una ciudad elegida sería
-  // una sola barra).
   const emoflowCiudades = useMemo(() => {
-    if (!datos) return [];
-    return (datos.emoflowPorCiudad ?? []).map((c) => ({
+    return (emoflowPorCiudadSrc ?? []).map((c) => ({
       etiqueta: ETIQUETA_GRUPO[c.grupo_ciudad] ?? c.grupo_ciudad,
       ingresos_promedio: Number(c.ingresos_promedio ?? 0),
     }));
-  }, [datos]);
+  }, [emoflowPorCiudadSrc]);
 
   // % de participación Emoflow (Completado/Real) por ciudad — snapshot más reciente para la
   // barra "hoy", serie completa para la evolución. Fuente: bloque EMOFLOW de Estadísticas.
+  // Sin dimensión de Estado en la fuente — se muestra igual en los 3 estados.
   const participacionUltima = useMemo(() => {
     const filas = datos?.emoflowParticipacion ?? [];
     if (filas.length === 0) return { fecha: null as string | null, semana: null as number | null, datos: [] };
@@ -319,10 +463,6 @@ export default function Pagina() {
     };
   }, [datos]);
 
-  // La evolución grafica el CONTEO de check-ins (completado), no el %. El % pasado no es
-  // reconstruible: el denominador (Real) de cada semana no existe en ninguna fuente, y usar el
-  // Real actual daría >100% en ciudades cuya cohorte encogió. El conteo es fiel (validado contra
-  // Estadísticas para la Semana 16) y arranca en la Semana 1 gracias al backfill de la hoja cruda.
   const participacionEvolucion = useMemo(() => {
     const filas = datos?.emoflowParticipacion ?? [];
     return filas.map((f) => ({
@@ -341,8 +481,12 @@ export default function Pagina() {
     [datos, programa, cohorte],
   );
 
-  // Distribución de estudiantes por # de cursos aprobados (histograma). Se rellenan los huecos
-  // (0..max) para que el eje sea continuo y muestre honestamente los tramos sin nadie.
+  // Única decisión de qué vista de Cursos usar (§1.2 del diagnóstico: antes se calculaba dos
+  // veces, en Resumen y en Cursos, con riesgo de desalinearse). Se consume igual en ambos tabs.
+  const mostrarCanonico = esActual && aprobacionProg.length > 0;
+
+  // Distribución de estudiantes por # de cursos aprobados (histograma, solo Activos). Se
+  // rellenan los huecos (0..max) para que el eje sea continuo.
   const distribucionEst = useMemo(() => {
     if (!datos) return [] as { etiqueta: string; estudiantes: number }[];
     const filas = datos.estudiantesDist.filter(
@@ -356,6 +500,47 @@ export default function Pagina() {
     }));
   }, [datos, cohorte, programa]);
 
+  const ingresosProg = useMemo(
+    () => datos?.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa),
+    [datos, cohorte, programa],
+  );
+
+  // Segmentos del gráfico de aprobación por curso, recortados al Estado elegido: Activos
+  // (aprobó/en curso, denominador=activos), Retirados (aprobó-y-retiró/retirado,
+  // denominador=retirados) o Todos (los 4 segmentos, como antes — denominador=cursaron).
+  const segmentosAprobacion = (a: (typeof aprobacionProg)[number]) => {
+    if (estado === 'activos') {
+      return {
+        curso: a.curso,
+        aprobados: a.aprobados,
+        en_curso: (a.banda_0_25 ?? 0) + (a.banda_26_80 ?? 0),
+        aprobados_retirados: 0,
+        retirados: 0,
+      };
+    }
+    if (estado === 'retirados') {
+      return {
+        curso: a.curso,
+        aprobados: 0,
+        en_curso: 0,
+        aprobados_retirados: a.aprobados_retirados,
+        retirados: a.retirados,
+      };
+    }
+    return {
+      curso: a.curso,
+      aprobados: a.aprobados,
+      en_curso: (a.banda_0_25 ?? 0) + (a.banda_26_80 ?? 0),
+      aprobados_retirados: a.aprobados_retirados,
+      retirados: a.retirados,
+    };
+  };
+  const totalPorEstado = (a: (typeof aprobacionProg)[number]) =>
+    estado === 'activos' ? a.activos : estado === 'retirados' ? a.retirados : a.cursaron;
+  const aprobadosPorEstado = (a: (typeof aprobacionProg)[number]) =>
+    estado === 'activos' ? a.aprobados : estado === 'retirados' ? a.aprobados_retirados
+      : (a.aprobados_total ?? a.aprobados + a.aprobados_retirados);
+
   const kpis = useMemo(() => {
     if (!datos) return null;
     const ps = datos.programas.find(
@@ -363,61 +548,36 @@ export default function Pagina() {
     );
     // cohorte_stats viene separada por programa desde la migración de separación JC/MR
     const co = datos.cohorte.find((c) => c.cohorte === cohorte && c.programa === programa);
-    // Ingresados canónicos (cohorte completa: activos + retirados)
-    const ing = datos.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa);
+    const ing = ingresosProg;
 
-    // Si hay ciudad elegida (solo para JC), usar datos filtrados por ciudad
     let participantes = ps?.participantes ?? 0;
     let matriculas = ps?.matriculas ?? 0;
     let completadas = ps?.completadas ?? 0;
     let promedio = ps?.promedio_avance ? `${ps.promedio_avance}%` : '—';
     let edadProm = co?.edad_promedio ? Number(co.edad_promedio).toFixed(1) : '—';
-    let empMarcha = datos.emprendimiento.find((e) => e.situacion === 'en_marcha')?.total ?? 0;
 
-    if (programa === 'jc' && ciudadElegida) {
-      const statsCiudad = datos.statsProgramaPorCiudad?.find((s) => s.grupo_ciudad === ciudadElegida);
-      if (statsCiudad) {
-        participantes = statsCiudad.participantes;
-        matriculas = statsCiudad.matriculas;
-        completadas = statsCiudad.completadas;
-        promedio = statsCiudad.promedio_avance ? `${statsCiudad.promedio_avance}%` : '—';
-        empMarcha = statsCiudad.con_emprendimiento;
-      }
-
-      // Edad promedio de la ciudad seleccionada
-      const ciudadDem = participantesFiltrados[0];
-      if (ciudadDem?.edad_promedio) {
-        edadProm = Number(ciudadDem.edad_promedio).toFixed(1);
-      }
+    if (hayFiltroCiudad && geografiaResumen) {
+      // v_pub_geografia cubre ambos programas — reemplaza al viejo statsProgramaPorCiudad
+      // (JC-only), que no tenía cómo filtrar a Mujeres ROFÉ.
+      participantes = geografiaResumen.personas;
+      completadas = geografiaResumen.aprobados;
+      matriculas = geografiaResumen.personas;
+      promedio = geografiaResumen.avance != null ? `${geografiaResumen.avance.toFixed(1)}%` : '—';
     }
 
-    // cohorte_ingresos (la cohorte canónica: activos + retirados) no tiene desglose por
-    // ciudad — el dato de retiros no trae grupo_ciudad. Con una ciudad elegida mostramos
-    // participantes activos de esa ciudad en vez de un total nacional que no aplica.
-    const hayFiltroCiudad = programa === 'jc' && ciudadElegida !== null;
-
-    // Cohorte actual sin filtro de ciudad → TODO el encabezado de cursos sale del canónico
-    // (aprobacion_cursos + cohorte_ingresos): misma fuente que el dashboard GitHub y sin pasar
-    // por el Sheet h2test (export_aprobacion.py entra directo a Q10). v_programa_stats (derivado
-    // de enrollments/Sheets) queda solo para cohortes históricas y para la vista por ciudad,
-    // donde no existe alternativa canónica. Así ambos paneles muestran los mismos números.
     // Desglose de las matrículas de la cohorte en los 4 estados accionables (canónico).
-    // Suman a `cursaron`: aprobadas (>80, incl. retirados que aprobaron) + en progreso (26-80)
-    // + en riesgo (0-25) + retiradas sin aprobar. Útil para decidir dónde intervenir.
-    let estado: null | {
+    let estadoCohorte: null | {
       aprobadas: number; enProgreso: number; enRiesgo: number; retiradas: number; total: number;
     } = null;
 
-    const esCanonico = esActual && aprobacionProg.length > 0 && !hayFiltroCiudad;
+    const esCanonico = mostrarCanonico && !hayFiltroCiudad;
     if (esCanonico) {
       matriculas = aprobacionProg.reduce((s, a) => s + a.cursaron, 0);
       completadas = aprobacionProg.reduce(
         (s, a) => s + (a.aprobados_total ?? a.aprobados + a.aprobados_retirados), 0);
-      // Avance promedio ponderado por cursaron — los promedios por curso ya son canónicos,
-      // el frontend solo agrega (no re-deriva desde matrículas crudas).
       const sumaPond = aprobacionProg.reduce((s, a) => s + Number(a.promedio ?? 0) * a.cursaron, 0);
       promedio = matriculas ? `${(sumaPond / matriculas).toFixed(1)}%` : promedio;
-      estado = {
+      estadoCohorte = {
         aprobadas: completadas,
         enProgreso: aprobacionProg.reduce((s, a) => s + (a.banda_26_80 ?? 0), 0),
         enRiesgo: aprobacionProg.reduce((s, a) => s + (a.banda_0_25 ?? 0), 0),
@@ -426,8 +586,7 @@ export default function Pagina() {
       };
     }
 
-    // Desglose por ESTUDIANTES (personas únicas) — v_cohorte_estudiantes clasifica a cada
-    // estudiante activo por su avance promedio; los retirados salen de cohorte_ingresos.
+    // Desglose por ESTUDIANTES (personas únicas, solo Activos — ver nota de unidadEstadoCohorte)
     let estadoEst: null | {
       alDia: number; enProgreso: number; enRiesgo: number; retirados: number;
       total: number; promAprobados: number | null;
@@ -447,6 +606,10 @@ export default function Pagina() {
       }
     }
 
+    // Filtro "Estado": cambia qué número de cohorte_ingresos es EL número principal, no solo
+    // un detalle pasivo (§2.1.3 — reemplaza la exposición de solo lectura de antes).
+    const cifraEstado = !ing ? null : estado === 'activos' ? ing.activos : estado === 'retirados' ? ing.retirados : ing.ingresados;
+
     return {
       participantes,
       matriculas,
@@ -455,32 +618,18 @@ export default function Pagina() {
       pctAprobados: hayFiltroCiudad ? null : (ing?.pct_aprobados ? `${ing.pct_aprobados}%` : '—'),
       esCanonico,
       numCursos: aprobacionProg.length,
-      estado,
+      estadoCohorte,
       estadoEst,
       edadProm,
-      empMarcha,
+      cifraEstado,
       ingresados: hayFiltroCiudad ? null : ing?.ingresados ?? null,
       activos: ing?.activos ?? null,
       retirados: ing?.retirados ?? null,
     };
-  }, [datos, programa, cohorte, ciudadElegida, participantesFiltrados, esActual, aprobacionProg]);
+  }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, aprobacionProg, mostrarCanonico, ingresosProg]);
 
-  const ajustarTab = (p: Programa, actual: boolean) => {
-    if (!tabsDisponibles(p, actual).includes(tab)) setTab('Resumen');
-  };
-
-  const cambiarPrograma = (p: Programa) => {
-    setPrograma(p);
-    if (p !== 'jc') setCiudadElegida(null);
-    ajustarTab(p, esActual);
-  };
-
-  const cambiarCohorte = (coh: string) => {
-    setCohorteElegida(coh);
-    // Solo la cohorte actual tiene datos de ciudad — no arrastrar el filtro a una pasada.
-    if (coh !== cohorteActual) setCiudadElegida(null);
-    ajustarTab(programa, coh === cohorteActual);
-  };
+  const cambiarPrograma = (p: Programa) => setPrograma(p);
+  const cambiarCohorte = (coh: string) => setCohorteElegida(coh);
 
   if (error)
     return (
@@ -511,33 +660,98 @@ export default function Pagina() {
       </>
     );
 
-  // v_mr_demografia (formato largo) → filas de una dimensión, con etiqueta y orden fijo
-  const dimensionMr = (dim: string) => {
-    const filas = datos.mrDemografia.filter((d) => d.dimension === dim);
-    const orden = ORDEN_MR[dim];
-    if (orden) filas.sort((a, b) => orden.indexOf(a.categoria) - orden.indexOf(b.categoria));
-    return filas.map((d) => ({ ...d, etiqueta: ETIQUETA_MR[d.categoria] ?? d.categoria }));
-  };
+  // v_mr_demografia (formato largo, legacy) — solo se conserva para la tarjeta de
+  // "Emprendimiento" (booleano tiene_emprendimiento) dentro de Demografía MR: v_pub_demografia
+  // (037) no incluye esa dimensión (pertenece conceptualmente al tab Emprendimiento, que para
+  // MR no existe como encuesta detallada) — mezclar aquí la fuente vieja es deliberado y de
+  // bajo riesgo, documentado en plan-rediseno-panel-datos-2026-07-30.md Fase 3.
   const totalMrConDatos = datos.mrDemografia
     .filter((d) => d.dimension === 'emprendimiento')
     .reduce((s, d) => s + d.total, 0);
+  const emprendimientoBooleanoMr = datos.mrDemografia
+    .filter((d) => d.dimension === 'emprendimiento')
+    .map((d) => ({
+      nombre: ETIQUETA_MR[d.categoria] ?? d.categoria,
+      total: d.total,
+      color: d.categoria === 'con_emprendimiento' ? C.verde : C.amarillo,
+    }));
 
-  const emprendimientoOrdenado = ORDEN_SITUACION.map((s) => {
-    const empSource = programa === 'jc' && ciudadElegida ? emprendimientoPorCiudad : datos.emprendimiento;
-    return {
-      nombre: ETIQUETA_SITUACION[s],
-      total: empSource.find((e) => e.situacion === s)?.total ?? 0,
-      color: COLOR_SITUACION[s],
-    };
-  });
-
+  const mapaEmprendimiento = agregarEmprendimiento(pubEmprendimientoFiltrada);
+  const emprendimientoOrdenado = ORDEN_SITUACION.map((s) => ({
+    nombre: ETIQUETA_SITUACION[s],
+    total: mapaEmprendimiento.get(s)?.total ?? 0,
+    color: COLOR_SITUACION[s],
+  }));
   const empVsCursos = ORDEN_SITUACION.map((s) => {
-    const fila = datos.empVsCursos.find((e) => e.situacion === s);
+    const acc = mapaEmprendimiento.get(s);
+    const prom = acc && acc.pesoCursos ? acc.sumaCursos / acc.pesoCursos : 0;
     return {
       etiqueta: ETIQUETA_SITUACION[s].replace('Emprendimiento ', '').replace('Tiene una ', ''),
-      cursos: fila ? Number(fila.prom_cursos_completados) : 0,
+      cursos: prom,
     };
   });
+
+  // Renderiza una dimensión de v_pub_demografia como tarjeta — real, "no aplica" (esta fuente
+  // nunca trae ese dato para el programa elegido) o "sin datos" (el filtro vigente no trae
+  // filas, pero el programa sí tiene la fuente). "No aplica" se decide SOLO con datos reales
+  // (dimensionAplicaPrograma revisa si v_pub_demografia trae alguna fila) — no por programa
+  // hardcodeado, para no repetir el hallazgo de 2026-08-06 (JC sí tiene estas 4 dimensiones
+  // desde ese día, ver docs/procesos/demografia-historica-jc.md).
+  function TarjetaDemografia({ dimension }: { dimension: (typeof DIMENSIONES_DEMOGRAFIA)[number] }) {
+    if (!dimensionAplicaPrograma(dimension)) {
+      return (
+        <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
+          <NoAplica motivo="esta fuente no tiene ese dato para este programa." />
+        </Seccion>
+      );
+    }
+    const mapa = agregarPorCategoria(pubDemografiaFiltrada, dimension);
+    if (mapa.size === 0) {
+      return (
+        <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
+          <NoAplica motivo="sin datos para este filtro (cohorte/estado/ciudad elegidos)." suave />
+        </Seccion>
+      );
+    }
+
+    if (dimension === 'genero') {
+      const filas = Array.from(mapa.entries()).map(([categoria, total]) => ({
+        nombre: categoria,
+        total,
+        color: COLOR_GENERO[categoria] ?? C.amarillo,
+      }));
+      return (
+        <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
+          <GraficoEmprendimiento datos={filas} />
+        </Seccion>
+      );
+    }
+    if (dimension === 'estado_civil' || dimension === 'tipo_vivienda') {
+      const filas = Array.from(mapa.entries()).map(([categoria, total], i) => ({
+        nombre: ETIQUETA_MR[categoria] ?? categoria,
+        total,
+        color: [C.naranja, C.azul2, C.verde, C.amarillo, C.rojo][i % 5],
+      }));
+      return (
+        <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
+          <GraficoEmprendimiento datos={filas} />
+        </Seccion>
+      );
+    }
+    // edad_rango / estrato / nivel_estudio: barras, con orden fijo cuando existe.
+    const orden = dimension === 'edad_rango' && programa === 'jc' ? ORDEN_EDAD_JC : ORDEN_MR[dimension];
+    let filas = Array.from(mapa.entries()).map(([categoria, total]) => ({
+      etiqueta: dimension === 'estrato' ? `Estrato ${categoria}` : (ETIQUETA_MR[categoria] ?? categoria),
+      total,
+      orden: categoria,
+    }));
+    if (orden) filas.sort((a, b) => orden.indexOf(a.orden) - orden.indexOf(b.orden));
+    return (
+      <Seccion titulo={ETIQUETA_DIMENSION[dimension]} nota={dimension === 'edad_rango' ? 'En rangos — nunca edades individuales.' : undefined}>
+        <GraficoBarras datos={filas} dataKey="total" nombre="Personas" color={C.azul2} />
+      </Seccion>
+    );
+  }
 
   return (
     <>
@@ -548,9 +762,6 @@ export default function Pagina() {
         id="panel"
         className={`max-w-[1600px] mx-auto px-4 py-8 scroll-mt-20 ${programa === 'mr' ? 'tema-mr' : ''}`}
       >
-      {/* Fecha del dato — un número correcto sin fecha es tan engañoso como uno equivocado
-          (ver diccionario-metricas.md). vencido=true en cualquier proceso relevante avisa que
-          el pipeline nocturno pudo no correr. */}
       {frescuraResumen && (
         <p
           className={`text-xs mb-3 ${
@@ -597,38 +808,75 @@ export default function Pagina() {
             </button>
           ))}
         </div>
-        {/* Selector de ciudad — solo JC y solo cohorte actual: grupo_ciudad viene de la BD de
-            monitorias, que únicamente cubre a los participantes del año en curso. */}
-        {programa === 'jc' && esActual && ciudades.length > 0 && (
-          <div className="flex gap-1 tarjeta-glass p-1 flex-wrap">
+        {/* Filtro global "Estado" (NUEVO, migración 037): reemplaza la exposición pasiva de
+            activos/retirados por un control real, propagado a Resumen/Cursos/Demografía/
+            Emprendimiento/Emoflow/Asistencia. */}
+        <div className="flex gap-1 tarjeta-glass p-1">
+          {(['activos', 'todos', 'retirados'] as Estado[]).map((e) => (
             <button
-              onClick={() => setCiudadElegida(null)}
+              key={e}
+              onClick={() => setEstado(e)}
               className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                ciudadElegida === null
-                  ? 'pill-metal pill-metal-amarillo'
-                  : 'text-slate-600 hover:bg-slate-100'
+                estado === e ? 'pill-metal pill-metal-amarillo' : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
-              Todas
+              {ETIQUETA_ESTADO[e]}
             </button>
-            {ciudades.map((ciudad) => (
+          ))}
+        </div>
+        {/* Selector de ciudad/municipio UNIFICADO (§2.1.4) — ambos programas, drill-down de
+            municipio integrado como segunda fila en vez de una sección aparte. */}
+        {gruposGeografia.length > 0 && (
+          <div className="flex flex-col gap-1 tarjeta-glass p-1">
+            <div className="flex gap-1 flex-wrap">
               <button
-                key={ciudad}
-                onClick={() => setCiudadElegida(ciudad)}
+                onClick={() => { setCiudadElegida(null); setMunicipioElegido(null); }}
                 className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  ciudadElegida === ciudad
-                    ? 'pill-metal pill-metal-naranja'
-                    : 'text-slate-600 hover:bg-slate-100'
+                  ciudadElegida === null ? 'pill-metal pill-metal-amarillo' : 'text-slate-600 hover:bg-slate-100'
                 }`}
               >
-                {ETIQUETA_GRUPO[ciudad] ?? ciudad}
+                Todas
               </button>
-            ))}
+              {gruposGeografia.map(({ grupo, total }) => (
+                <button
+                  key={grupo}
+                  onClick={() => { setCiudadElegida(grupo); setMunicipioElegido(null); }}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    ciudadElegida === grupo ? 'pill-metal pill-metal-naranja' : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {ETIQUETA_GRUPO[grupo] ?? grupo} · {total}
+                </button>
+              ))}
+            </div>
+            {ciudadElegida && municipiosGrupo.length > 1 && (
+              <div className="flex gap-1 flex-wrap pl-2 border-l-2 border-slate-200/70">
+                <button
+                  onClick={() => setMunicipioElegido(null)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                    municipioElegido === null ? 'pill-metal pill-metal-oscuro' : 'text-slate-500 hover:bg-slate-100'
+                  }`}
+                >
+                  Todo {ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}
+                </button>
+                {municipiosGrupo.map((m) => (
+                  <button
+                    key={m.municipio}
+                    onClick={() => setMunicipioElegido(m.municipio)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors ${
+                      municipioElegido === m.municipio ? 'pill-metal pill-metal-oscuro' : 'text-slate-500 hover:bg-slate-100'
+                    }`}
+                  >
+                    {m.municipio} · {m.personas}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
-        {/* Tabs del programa/cohorte activos */}
+        {/* Tabs — siempre las 7, cada sección decide "no aplica" internamente */}
         <nav className="flex gap-1 tarjeta-glass p-1 flex-wrap">
-          {tabsDisponibles(programa, esActual).map((t) => (
+          {TABS.map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -645,11 +893,15 @@ export default function Pagina() {
       {tab === 'Resumen' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3 mb-5">
-            {esActual && kpis.ingresados !== null ? (
+            {esActual && kpis.cifraEstado !== null ? (
               <Kpi
-                titulo={`Ingresados ${NOMBRE_PROGRAMA[programa]}`}
-                valor={String(kpis.ingresados)}
-                detalle={`Cohorte ${cohorte} completa: ${kpis.activos} activos + ${kpis.retirados} retirados (sin perfiles de prueba ni retiros institucionales)`}
+                titulo={`${ETIQUETA_ESTADO[estado]} ${NOMBRE_PROGRAMA[programa]}`}
+                valor={String(kpis.cifraEstado)}
+                detalle={
+                  estado === 'todos'
+                    ? `Cohorte ${cohorte} completa: ${kpis.activos} activos + ${kpis.retirados} retirados (sin perfiles de prueba ni retiros institucionales)`
+                    : `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte}`
+                }
               />
             ) : (
               <Kpi
@@ -693,46 +945,47 @@ export default function Pagina() {
               />
             )}
           </div>
-          {/* Estado de la cohorte — desglose canónico en 4 estados accionables. Toggle entre
-              MATRÍCULAS (inscripciones, de aprobacion_cursos) y ESTUDIANTES (personas únicas, de
-              v_cohorte_estudiantes). Solo cohorte actual sin filtro de ciudad; auto-adaptable. */}
-          {kpis.esCanonico && kpis.estado && (
+          {kpis.esCanonico && kpis.estadoCohorte && (
             <Seccion
               titulo="Estado de la cohorte"
               nota={
-                unidadEstado === 'matriculas'
-                  ? `Desglose de las ${kpis.estado.total.toLocaleString('es-CO')} matrículas (inscripciones) de la cohorte completa — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${cohorte}. Se aprueba con avance > 80%.`
+                unidadEstadoCohorte === 'matriculas'
+                  ? `Desglose de las ${kpis.estadoCohorte.total.toLocaleString('es-CO')} matrículas (inscripciones) de la cohorte completa — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${cohorte}. Se aprueba con avance > 80%.`
                   : kpis.estadoEst
                     ? `Desglose de los ${kpis.estadoEst.total.toLocaleString('es-CO')} estudiantes (personas únicas) según su avance promedio en la cohorte. ${NOMBRE_PROGRAMA[programa]} · ${cohorte}. En promedio cada uno ha aprobado ${kpis.estadoEst.promAprobados ?? '—'} cursos.`
                     : 'Sin datos por estudiante para esta cohorte.'
               }
             >
-              {/* Toggle matrículas / estudiantes */}
               <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4">
-                {([['matriculas', 'Por matrículas'], ['estudiantes', 'Por estudiantes']] as const).map(
-                  ([u, txt]) => (
-                    <button
-                      key={u}
-                      onClick={() => setUnidadEstado(u)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                        unidadEstado === u
-                          ? programa === 'mr'
-                            ? 'pill-metal pill-metal-rosa'
-                            : 'pill-metal pill-metal-azul'
-                          : 'text-slate-600 hover:bg-slate-100'
-                      }`}
-                    >
-                      {txt}
-                    </button>
-                  ),
+                <button
+                  onClick={() => setUnidadEstadoCohorte('matriculas')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                    unidadEstadoCohorte === 'matriculas'
+                      ? programa === 'mr' ? 'pill-metal pill-metal-rosa' : 'pill-metal pill-metal-azul'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  Por matrículas
+                </button>
+                {estado === 'activos' && (
+                  <button
+                    onClick={() => setUnidadEstadoCohorte('estudiantes')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                      unidadEstadoCohorte === 'estudiantes'
+                        ? programa === 'mr' ? 'pill-metal pill-metal-rosa' : 'pill-metal pill-metal-azul'
+                        : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    Por estudiantes
+                  </button>
                 )}
               </div>
-              {unidadEstado === 'matriculas' ? (
+              {unidadEstadoCohorte === 'matriculas' ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <EstadoStat etiqueta="Aprobadas" valor={kpis.estado.aprobadas} total={kpis.estado.total} color={C.verde} detalle="avance > 80%" />
-                  <EstadoStat etiqueta="En progreso" valor={kpis.estado.enProgreso} total={kpis.estado.total} color={C.amarillo} detalle="avance 26–80%" />
-                  <EstadoStat etiqueta="En riesgo" valor={kpis.estado.enRiesgo} total={kpis.estado.total} color={C.naranja} detalle="avance 0–25%" />
-                  <EstadoStat etiqueta="Retiradas sin aprobar" valor={kpis.estado.retiradas} total={kpis.estado.total} color={C.rojo} detalle="inhabilitadas < 80%" />
+                  <EstadoStat etiqueta="Aprobadas" valor={kpis.estadoCohorte.aprobadas} total={kpis.estadoCohorte.total} color={C.verde} detalle="avance > 80%" />
+                  <EstadoStat etiqueta="En progreso" valor={kpis.estadoCohorte.enProgreso} total={kpis.estadoCohorte.total} color={C.amarillo} detalle="avance 26–80%" />
+                  <EstadoStat etiqueta="En riesgo" valor={kpis.estadoCohorte.enRiesgo} total={kpis.estadoCohorte.total} color={C.naranja} detalle="avance 0–25%" />
+                  <EstadoStat etiqueta="Retiradas sin aprobar" valor={kpis.estadoCohorte.retiradas} total={kpis.estadoCohorte.total} color={C.rojo} detalle="inhabilitadas < 80%" />
                 </div>
               ) : kpis.estadoEst ? (
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -746,75 +999,31 @@ export default function Pagina() {
               )}
             </Seccion>
           )}
-          {/* Geografía por municipio (v_pub_geografia, Fase 3 de plan-visualizacion-2026-07-30).
-              Click en un grupo (ej. BOG) despliega sus municipios. Los municipios con menos de
-              5 personas ya vienen agrupados como "Área metropolitana" desde la vista —
-              decisión de Lina, 2026-07-30 — no hay celda chica que filtrar acá. */}
-          {esActual && gruposGeografia.length > 0 && (
-            <Seccion
-              titulo={`Geografía — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
-              nota={
-                programa === 'jc'
-                  ? 'JC registra toda la conurbación bajo un solo municipio (usualmente "Bogotá D.C.") — Q10 no captura el municipio real, así que el desglose por grupo es la granularidad máxima disponible.'
-                  : 'Click en un grupo para ver sus municipios. Municipios con menos de 5 personas se agrupan como "Área metropolitana" para no exponer celdas identificables de una población vulnerable.'
-              }
-            >
-              <div className="flex gap-1 tarjeta-glass p-1 flex-wrap mb-3">
-                {gruposGeografia.map(({ grupo, total }) => (
-                  <button
-                    key={grupo}
-                    onClick={() => setGrupoGeografia(grupo === grupoGeografia ? null : grupo)}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      grupoGeografia === grupo
-                        ? 'pill-metal pill-metal-naranja'
-                        : 'text-slate-600 hover:bg-slate-100'
-                    }`}
-                  >
-                    {ETIQUETA_GRUPO[grupo] ?? grupo} · {total}
-                  </button>
-                ))}
+          {esActual && geografiaResumen && ciudadElegida && (
+            <Seccion titulo={`${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}${municipioElegido ? ` · ${municipioElegido}` : ''}`}>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                <EstadoStat etiqueta="Personas" valor={geografiaResumen.personas} total={geografiaResumen.personas} color={C.azul2} detalle="en esta selección" />
+                <EstadoStat etiqueta="Al día" valor={geografiaResumen.aprobados} total={geografiaResumen.personas} color={C.verde} detalle="avance > 80%" />
               </div>
-              {grupoGeografia && municipiosGrupo.length > 0 && (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {municipiosGrupo.map((m) => (
-                    <div
-                      key={m.municipio}
-                      className="rounded-xl border border-slate-200/70 bg-white/40 p-2.5"
-                    >
-                      <p className="text-xs font-semibold text-slate-600">{m.municipio}</p>
-                      <p className="text-lg font-bold kpi-valor mt-1">{m.personas}</p>
-                      <p className="text-xs text-slate-400">
-                        avance {m.avance_promedio ?? '—'}% · {m.aprobados} al día
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              )}
             </Seccion>
           )}
-          {/* El desglose de aprobación (aprobados/retirados) sale de aprobacion_cursos, que no
-              trae grupo_ciudad. Con una ciudad elegida caemos al gráfico de completación, que
-              sí está desglosado por ciudad. */}
-          {esActual && aprobacionProg.length > 0 && !ciudadElegida ? (
+          {mostrarCanonico && !hayFiltroCiudad ? (
             <Seccion
-              titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
+              titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`}
               nota={`Cada barra suma la cohorte completa que cursó (${kpis.ingresados ?? '—'} ingresados en los cursos base): aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro.`}
             >
-              <GraficoAprobacion
-                datos={aprobacionProg.map((a) => ({
-                  curso: a.curso,
-                  aprobados: a.aprobados,
-                  en_curso: (a.banda_0_25 ?? 0) + (a.banda_26_80 ?? 0),
-                  aprobados_retirados: a.aprobados_retirados,
-                  retirados: a.retirados,
-                }))}
-              />
+              <GraficoAprobacion datos={aprobacionProg.map(segmentosAprobacion)} />
             </Seccion>
           ) : (
             <Seccion
-              titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida]})` : ''}`}
-              nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida]}.` : "Completado = avance > 80% (mismo criterio del panel de aprobación)."}
+              titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
+              nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}.` : "Completado = avance > 80% (mismo criterio del panel de aprobación)."}
             >
+              {ciudadElegida && programa === 'mr' && (
+                <p className="text-xs text-slate-400 mb-2">
+                  Desglose por ciudad aún no disponible para Cursos en Mujeres ROFÉ — mostrando el total del programa.
+                </p>
+              )}
               <GraficoCursos
                 datos={ciudadElegida
                   ? cursosPorCiudadFiltrados.map((c) => ({
@@ -830,75 +1039,67 @@ export default function Pagina() {
         </>
       )}
 
-      {tab === 'Cursos' && esActual && aprobacionProg.length > 0 && (
+      {tab === 'Cursos' && mostrarCanonico && (
         <>
-          {/* Toggle matrículas / estudiantes — comparte estado con el Resumen */}
           <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4">
-            {([['matriculas', 'Por matrículas'], ['estudiantes', 'Por estudiantes']] as const).map(
-              ([u, txt]) => (
-                <button
-                  key={u}
-                  onClick={() => setUnidadEstado(u)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                    unidadEstado === u
-                      ? programa === 'mr'
-                        ? 'pill-metal pill-metal-rosa'
-                        : 'pill-metal pill-metal-azul'
-                      : 'text-slate-600 hover:bg-slate-100'
-                  }`}
-                >
-                  {txt}
-                </button>
-              ),
+            <button
+              onClick={() => setUnidadEstadoCohorte('matriculas')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                unidadEstadoCohorte === 'matriculas'
+                  ? programa === 'mr' ? 'pill-metal pill-metal-rosa' : 'pill-metal pill-metal-azul'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Por matrículas
+            </button>
+            {estado === 'activos' && (
+              <button
+                onClick={() => setUnidadEstadoCohorte('estudiantes')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  unidadEstadoCohorte === 'estudiantes'
+                    ? programa === 'mr' ? 'pill-metal pill-metal-rosa' : 'pill-metal pill-metal-azul'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                Por estudiantes
+              </button>
             )}
           </div>
 
-          {unidadEstado === 'matriculas' ? (
+          {unidadEstadoCohorte === 'matriculas' ? (
             <>
               <Seccion
-                titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
-                nota={`Cada barra suma la cohorte completa que cursó: aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro.`}
+                titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`}
+                nota="Cada barra suma la cohorte completa que cursó: aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro."
               >
-                <GraficoAprobacion
-                  datos={aprobacionProg.map((a) => ({
-                    curso: a.curso,
-                    aprobados: a.aprobados,
-                    en_curso: (a.banda_0_25 ?? 0) + (a.banda_26_80 ?? 0),
-                    aprobados_retirados: a.aprobados_retirados,
-                    retirados: a.retirados,
-                  }))}
-                />
+                <GraficoAprobacion datos={aprobacionProg.map(segmentosAprobacion)} />
               </Seccion>
-              <Seccion titulo="Detalle por curso (cohorte completa)">
+              <Seccion titulo={`Detalle por curso (${ETIQUETA_ESTADO[estado].toLowerCase()})`}>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-left text-slate-500 border-b border-slate-200">
                         <th className="py-2 pr-4">Curso</th>
-                        <th className="py-2 pr-4 text-right">Cursaron</th>
+                        <th className="py-2 pr-4 text-right">{estado === 'retirados' ? 'Se retiraron' : estado === 'activos' ? 'Activos' : 'Cursaron'}</th>
                         <th className="py-2 pr-4 text-right">Aprobaron</th>
-                        <th className="py-2 pr-4 text-right">En curso</th>
-                        <th className="py-2 pr-4 text-right">Retirados sin aprobar</th>
-                        <th className="py-2 pr-4 text-right">% Aprobados</th>
                         <th className="py-2 text-right">Avance promedio</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {aprobacionProg.map((a) => (
-                        <tr key={a.curso} className="border-b border-slate-100">
-                          <td className="py-2 pr-4">{a.curso}</td>
-                          <td className="py-2 pr-4 text-right">{a.cursaron}</td>
-                          <td className="py-2 pr-4 text-right">
-                            {a.aprobados_total ?? a.aprobados + a.aprobados_retirados}
-                          </td>
-                          <td className="py-2 pr-4 text-right">
-                            {(a.banda_0_25 ?? 0) + (a.banda_26_80 ?? 0)}
-                          </td>
-                          <td className="py-2 pr-4 text-right">{a.retirados}</td>
-                          <td className="py-2 pr-4 text-right font-medium">{a.pct_aprobados ?? '—'}%</td>
-                          <td className="py-2 text-right">{a.promedio ?? '—'}%</td>
-                        </tr>
-                      ))}
+                      {aprobacionProg.map((a) => {
+                        const total = totalPorEstado(a);
+                        const aprobaron = aprobadosPorEstado(a);
+                        return (
+                          <tr key={a.curso} className="border-b border-slate-100">
+                            <td className="py-2 pr-4">{a.curso}</td>
+                            <td className="py-2 pr-4 text-right">{total}</td>
+                            <td className="py-2 pr-4 text-right">
+                              {aprobaron} {total ? `(${Math.round((100 * aprobaron) / total)}%)` : ''}
+                            </td>
+                            <td className="py-2 text-right">{a.promedio ?? '—'}%</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -935,12 +1136,17 @@ export default function Pagina() {
         </>
       )}
 
-      {tab === 'Cursos' && !(esActual && aprobacionProg.length > 0) && (
+      {tab === 'Cursos' && !mostrarCanonico && (
         <>
           <Seccion
-            titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida]})` : ''}`}
-            nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida]}.` : "Completado = avance > 80%."}
+            titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
+            nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}.` : "Completado = avance > 80%."}
           >
+            {ciudadElegida && programa === 'mr' && (
+              <p className="text-xs text-slate-400 mb-2">
+                Desglose por ciudad aún no disponible para Cursos en Mujeres ROFÉ — mostrando el total del programa.
+              </p>
+            )}
             <GraficoCursos
               datos={ciudadElegida
                 ? cursosPorCiudadFiltrados.map((c) => ({
@@ -977,293 +1183,281 @@ export default function Pagina() {
                 </tbody>
               </table>
             </div>
+            {!cursosPorCiudadDisponible && ciudadElegida && (
+              <p className="text-xs text-slate-400 mt-2">
+                Desglose por ciudad aún no disponible para Cursos en Mujeres ROFÉ.
+              </p>
+            )}
           </Seccion>
         </>
       )}
 
       {tab === 'Historial' && (
-        <>
-          <Seccion
-            titulo={`Evolución de matrículas — ${NOMBRE_PROGRAMA[programa]}${ciudadElegida ? ` · ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : ''}`}
-            nota={
-              ciudadElegida
-                ? `Serie de ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida} desde el 14 de julio de 2026, cuando empezamos a guardar el snapshot diario por ciudad. El histórico anterior (desde el 26 de junio) es nacional: nunca guardó la ciudad, así que no se puede desglosar hacia atrás.`
-                : 'Serie diaria desde el 26 de junio (histórico del dashboard + sync diario de Q10). Las matrículas de cursos terminados bajan cuando Q10 archiva estudiantes.'
-            }
-          >
-            <GraficoHistorial
-              historial={(ciudadElegida ? historialPorCiudad : historialProg).map((h) => ({
-                fecha: h.fecha,
-                curso: h.curso,
-                valor: Number(h.matriculados ?? 0),
-              }))}
-              metrica="matriculados"
-              nombreMetrica="Matriculados"
-            />
-          </Seccion>
-          <Seccion
-            titulo={`Evolución del avance promedio — ${NOMBRE_PROGRAMA[programa]}${ciudadElegida ? ` · ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : ''}`}
-            nota={
-              ciudadElegida
-                ? `Promedio de avance (%) por curso en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}. La serie por ciudad arranca el 14 de julio de 2026 y crece un punto por día.`
-                : 'Promedio de avance (%) por curso a lo largo del tiempo.'
-            }
-          >
-            <GraficoHistorial
-              historial={(ciudadElegida ? historialPorCiudad : historialProg).map((h) => ({
-                fecha: h.fecha,
-                curso: h.curso,
-                valor: h.promedio_avance !== null ? Number(h.promedio_avance) : null,
-              }))}
-              metrica="promedio"
-              nombreMetrica="Avance promedio %"
-            />
-          </Seccion>
-        </>
+        !esActual ? (
+          <NoAplica motivo="el histórico diario no distingue cohortes — solo se muestra para la cohorte vigente." />
+        ) : (
+          <>
+            <Seccion
+              titulo={`Evolución de matrículas — ${NOMBRE_PROGRAMA[programa]}${ciudadElegida ? ` · ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : ''}`}
+              nota={
+                ciudadElegida
+                  ? programa === 'jc'
+                    ? `Serie de ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida} desde el 14 de julio de 2026, cuando empezamos a guardar el snapshot diario por ciudad. El histórico anterior (desde el 26 de junio) es nacional: nunca guardó la ciudad, así que no se puede desglosar hacia atrás.`
+                    : 'Desglose por ciudad aún no disponible para Historial en Mujeres ROFÉ — mostrando el total del programa.'
+                  : 'Serie diaria desde el 26 de junio (histórico del dashboard + sync diario de Q10). Las matrículas de cursos terminados bajan cuando Q10 archiva estudiantes.'
+              }
+            >
+              <GraficoHistorial
+                historial={(ciudadElegida && programa === 'jc' ? historialPorCiudad : historialProg).map((h) => ({
+                  fecha: h.fecha,
+                  curso: h.curso,
+                  valor: Number(h.matriculados ?? 0),
+                }))}
+                metrica="matriculados"
+                nombreMetrica="Matriculados"
+              />
+            </Seccion>
+            <Seccion
+              titulo={`Evolución del avance promedio — ${NOMBRE_PROGRAMA[programa]}${ciudadElegida ? ` · ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : ''}`}
+              nota={
+                ciudadElegida && programa === 'jc'
+                  ? `Promedio de avance (%) por curso en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}. La serie por ciudad arranca el 14 de julio de 2026 y crece un punto por día.`
+                  : 'Promedio de avance (%) por curso a lo largo del tiempo.'
+              }
+            >
+              <GraficoHistorial
+                historial={(ciudadElegida && programa === 'jc' ? historialPorCiudad : historialProg).map((h) => ({
+                  fecha: h.fecha,
+                  curso: h.curso,
+                  valor: h.promedio_avance !== null ? Number(h.promedio_avance) : null,
+                }))}
+                metrica="promedio"
+                nombreMetrica="Avance promedio %"
+              />
+            </Seccion>
+          </>
+        )
       )}
 
-      {tab === 'Emprendimiento' && programa === 'jc' && (
-        <div className="grid md:grid-cols-2 gap-6">
-          <Seccion titulo="Situación frente al emprendimiento" nota="Encuesta de diagnóstico Jóvenes creaTIvos (696 respuestas).">
-            <GraficoEmprendimiento datos={emprendimientoOrdenado} />
-          </Seccion>
-          <Seccion titulo="Cursos completados según situación" nota="Promedio de cursos completados por participante en cada grupo.">
-            <GraficoBarras datos={empVsCursos} dataKey="cursos" nombre="Cursos completados (prom.)" color={C.verde} dominioMax={9} />
-            <p className="text-xs text-slate-400 mt-2">
-              Los cuatro grupos avanzan de forma pareja: tener (o no) un emprendimiento no cambia el ritmo en la ruta de cursos.
-            </p>
-          </Seccion>
-        </div>
+      {tab === 'Emprendimiento' && (
+        !emprendimientoAplicaPrograma ? (
+          <NoAplica motivo="Mujeres ROFÉ no tiene la encuesta de diagnóstico de emprendimiento (esa medición es solo de Jóvenes creaTIvos)." />
+        ) : pubEmprendimientoFiltrada.length === 0 ? (
+          <NoAplica motivo="sin datos para este filtro (cohorte/estado/ciudad elegidos)." suave />
+        ) : (
+          <div className="grid md:grid-cols-2 gap-6">
+            <Seccion titulo="Situación frente al emprendimiento" nota={`Encuesta de diagnóstico Jóvenes creaTIvos · ${cohorte} · ${ETIQUETA_ESTADO[estado]}.`}>
+              <GraficoEmprendimiento datos={emprendimientoOrdenado} />
+            </Seccion>
+            <Seccion titulo="Cursos completados según situación" nota="Promedio de cursos completados por participante en cada grupo.">
+              <GraficoBarras datos={empVsCursos} dataKey="cursos" nombre="Cursos completados (prom.)" color={C.verde} dominioMax={9} />
+              <p className="text-xs text-slate-400 mt-2">
+                Los cuatro grupos avanzan de forma pareja: tener (o no) un emprendimiento no cambia el ritmo en la ruta de cursos.
+              </p>
+            </Seccion>
+          </div>
+        )
       )}
 
-      {tab === 'Demografía' && programa === 'mr' && (
+      {tab === 'Demografía' && (
         <>
           <p className="text-xs text-slate-400 mb-4">
-            Fuente: BD-Mujeres ROFÉ — {totalMrConDatos} mujeres con datos sociodemográficos
-            (cubre el 99% de la cohorte 2026; solo agregados, nunca datos individuales).
+            {NOMBRE_PROGRAMA[programa]} · {cohorte} · {ETIQUETA_ESTADO[estado]}
+            {programa === 'mr' ? ` — fuente: BD-Mujeres ROFÉ (${totalMrConDatos} mujeres con datos sociodemográficos).` : ' — fuente: BD de monitorias.'}
           </p>
           <div className="grid md:grid-cols-2 gap-6">
-            <Seccion titulo="Estado civil">
-              <GraficoEmprendimiento
-                datos={dimensionMr('estado_civil').map((d, i) => ({
-                  nombre: d.etiqueta,
-                  total: d.total,
-                  color: [C.naranja, C.azul2, C.verde, C.amarillo, C.rojo][i % 5],
-                }))}
-              />
-            </Seccion>
-            <Seccion titulo="Nivel de estudios">
-              <GraficoBarras
-                datos={dimensionMr('nivel_estudio')}
-                dataKey="total"
-                nombre="Mujeres"
-                color={C.azul2}
-              />
-            </Seccion>
-            <Seccion titulo="Tipo de vivienda">
-              <GraficoEmprendimiento
-                datos={dimensionMr('tipo_vivienda').map((d, i) => ({
-                  nombre: d.etiqueta,
-                  total: d.total,
-                  color: [C.azul2, C.amarillo, C.verde][i % 3],
-                }))}
-              />
-            </Seccion>
-            <Seccion titulo="Estrato socioeconómico">
-              <GraficoBarras
-                datos={dimensionMr('estrato').map((d) => ({ ...d, etiqueta: `Estrato ${d.etiqueta}` }))}
-                dataKey="total"
-                nombre="Mujeres"
-                color={C.verde}
-              />
-            </Seccion>
-            <Seccion titulo="Distribución de edad" nota="En rangos — nunca edades individuales.">
-              <GraficoBarras
-                datos={dimensionMr('edad_rango')}
-                dataKey="total"
-                nombre="Mujeres"
-                color={C.naranja}
-              />
-            </Seccion>
-            <Seccion
-              titulo="Emprendimiento"
-              nota="Con emprendimiento = registra un emprendimiento con nombre en la BD."
-            >
-              <GraficoEmprendimiento
-                datos={dimensionMr('emprendimiento').map((d) => ({
-                  nombre: d.etiqueta,
-                  total: d.total,
-                  color: d.categoria === 'con_emprendimiento' ? C.verde : C.amarillo,
-                }))}
-              />
-            </Seccion>
+            {DIMENSIONES_DEMOGRAFIA.map((dim) => (
+              <TarjetaDemografia key={dim} dimension={dim} />
+            ))}
+            {programa === 'mr' ? (
+              <Seccion titulo="Emprendimiento" nota="Con emprendimiento = registra un emprendimiento con nombre en la BD.">
+                <GraficoEmprendimiento datos={emprendimientoBooleanoMr} />
+              </Seccion>
+            ) : (
+              <Seccion titulo="Emprendimiento">
+                <NoAplica motivo="para Jóvenes creaTIvos el diagnóstico de emprendimiento tiene su propio tab (más detalle: en marcha / idea / interesado / no interesado)." />
+              </Seccion>
+            )}
           </div>
         </>
       )}
 
-      {tab === 'Demografía' && programa === 'jc' && (
-        <>
-          <div className="grid md:grid-cols-2 gap-6">
-            <Seccion
-              titulo={ciudadElegida ? `Participantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : "Participantes por grupo"}
-              nota={ciudadElegida ? `Desglose de participantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}.` : "Grupos operativos por ciudad — Jóvenes creaTIvos."}>
-              <GraficoBarras
-                datos={participantesFiltrados.map((d) => ({
-                  etiqueta: ciudadElegida ? ETIQUETA_GRUPO[d.grupo_ciudad] ?? d.grupo_ciudad : ETIQUETA_GRUPO[d.grupo_ciudad] ?? d.grupo_ciudad,
-                  total: d.total,
-                }))}
-                dataKey="total"
-                nombre="Participantes"
-                color={C.azul2}
-                rotarEtiquetas
+      {tab === 'Emoflow' && (
+        programa === 'mr' ? (
+          <NoAplica motivo="Mujeres ROFÉ no usa la plataforma Emoflow (0 matrículas en la fuente)." />
+        ) : !esActual ? (
+          <NoAplica motivo="Emoflow es un acumulado en tiempo real — no tiene series por cohorte histórica." />
+        ) : emoflowKpis ? (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <Kpi
+                titulo={ciudadElegida ? `Estudiantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : `Estudiantes con Emoflow (${ETIQUETA_ESTADO[estado]})`}
+                valor={emoflowKpis.participantes.toLocaleString('es-CO')}
+                detalle={
+                  ciudadElegida || kpis.cifraEstado == null
+                    ? undefined
+                    : `de ${kpis.cifraEstado.toLocaleString('es-CO')} ${ETIQUETA_ESTADO[estado].toLowerCase()} (${Math.round((emoflowKpis.participantes / Math.max(kpis.cifraEstado, 1)) * 100)}%)`
+                }
               />
-            </Seccion>
-            <Seccion titulo={ciudadElegida ? `Género en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : "Género por grupo"}>
-              <GraficoDemografia
-                datos={participantesFiltrados.map((d) => ({
-                  ...d,
-                  grupo_ciudad: ETIQUETA_GRUPO[d.grupo_ciudad] ?? d.grupo_ciudad,
-                }))}
+              <Kpi
+                titulo="Ingresos promedio"
+                valor={emoflowKpis.promedio.toFixed(1)}
+                detalle={`mediana ${emoflowKpis.mediana}`}
               />
-            </Seccion>
-          </div>
-          <Seccion titulo="Distribución de edad" nota="En rangos — nunca edades individuales.">
-            <GraficoBarras
-              datos={datos.edades.map((e) => ({ etiqueta: e.rango, total: e.total }))}
-              dataKey="total"
-              nombre="Participantes"
-              color={C.naranja}
-            />
-          </Seccion>
-        </>
+              <Kpi
+                titulo="Activos últimos 7 días"
+                valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)}%` : '—'}
+                detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} estudiantes`}
+              />
+              <Kpi
+                titulo="Sin entrar hace +30 días"
+                valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.inactivos30 / emoflowKpis.participantes) * 100)}%` : '—'}
+                detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} estudiantes`}
+              />
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-6">
+              <Seccion
+                titulo="Distribución de uso"
+                nota={`Ingresos = veces que el estudiante entró al sistema (acumulado). ${ETIQUETA_ESTADO[estado]}.`}>
+                <GraficoBarras
+                  datos={emoflowBandas}
+                  dataKey="participantes"
+                  nombre="Estudiantes"
+                  color={C.azul2}
+                />
+              </Seccion>
+
+              <Seccion
+                titulo="¿El que más entra, aprueba más?"
+                nota="% de aprobación de cada banda de uso.">
+                <GraficoBarras
+                  datos={emoflowBandas}
+                  dataKey="pct_aprobacion"
+                  nombre="Aprobación %"
+                  color={C.verde}
+                  dominioMax={100}
+                />
+                <p className="text-xs text-slate-400 mt-2">
+                  La relación es real pero suave: quienes menos entran aprueban menos que quienes más
+                  entran. Sirve para detectar el extremo bajo, no como predictor fino.
+                </p>
+              </Seccion>
+            </div>
+
+            {!ciudadElegida && (
+              <Seccion titulo="Uso por ciudad" nota="Promedio de ingresos al sistema por grupo operativo.">
+                <GraficoBarras
+                  datos={emoflowCiudades}
+                  dataKey="ingresos_promedio"
+                  nombre="Ingresos promedio"
+                  color={C.naranja}
+                  rotarEtiquetas
+                />
+              </Seccion>
+            )}
+
+            {!ciudadElegida && datos.historialEmoflow.length > 0 && (
+              <Seccion
+                titulo="Evolución de ingresos al sistema"
+                nota={datos.historialEmoflow.length < 3
+                  ? `Serie nueva — arrancó el ${datos.historialEmoflow[0].fecha}, crece un punto por día con el sync automático. Con pocos días el gráfico se ve casi plano; se vuelve útil a medida que se acumulan semanas.`
+                  : 'Promedio nacional de ingresos al sistema (acumulado, universo "Todos"), un punto por día del sync automático.'}
+              >
+                <GraficoHistorial
+                  historial={datos.historialEmoflow.map((h) => ({
+                    fecha: h.fecha,
+                    curso: 'Ingresos promedio',
+                    valor: h.ingresos_promedio != null ? Number(h.ingresos_promedio) : null,
+                  }))}
+                  metrica="ingresos_promedio"
+                  nombreMetrica="Ingresos promedio"
+                />
+              </Seccion>
+            )}
+
+            {!ciudadElegida && participacionUltima.datos.length > 0 && (
+              <Seccion
+                titulo={`% de participación — Semana ${participacionUltima.semana ?? '—'}`}
+                nota={`Completado / Real de la encuesta semanal Emoflow por ciudad (corte ${participacionUltima.fecha}). Distinto de "ingresos al sistema": aquí se mide si diligenciaron el formulario de esa semana.`}
+              >
+                <GraficoBarras
+                  datos={participacionUltima.datos}
+                  dataKey="avance_pct"
+                  nombre="Participación %"
+                  color={C.azul3}
+                  dominioMax={100}
+                  rotarEtiquetas
+                />
+              </Seccion>
+            )}
+
+            {!ciudadElegida && participacionEvolucion.length > 0 && (
+              <Seccion
+                titulo="Evolución de la participación semanal"
+                nota='Check-ins registrados por ciudad y semana (Semana 1 en adelante). La última semana es la que está en curso, por eso aparece más baja. Fuente: registro semanal Emoflow.'
+              >
+                <GraficoHistorial
+                  historial={participacionEvolucion}
+                  metrica="completado"
+                  nombreMetrica="Check-ins"
+                />
+              </Seccion>
+            )}
+          </>
+        ) : (
+          <NoAplica motivo="sin datos de Emoflow para esta selección." suave />
+        )
       )}
 
-      {tab === 'Emoflow' && programa === 'jc' && (
-        <>
-          {emoflowKpis ? (
-            <>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <Kpi
-                  titulo={ciudadElegida ? `Estudiantes en ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : 'Estudiantes con Emoflow'}
-                  valor={emoflowKpis.participantes.toLocaleString('es-CO')}
-                  detalle={ciudadElegida ? undefined : 'de 777 activos (97%)'}
-                />
-                <Kpi
-                  titulo="Ingresos promedio"
-                  valor={emoflowKpis.promedio.toFixed(1)}
-                  detalle={`mediana ${emoflowKpis.mediana}`}
-                />
-                <Kpi
-                  titulo="Activos últimos 7 días"
-                  valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)}%` : '—'}
-                  detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} estudiantes`}
-                />
-                <Kpi
-                  titulo="Sin entrar hace +30 días"
-                  valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.inactivos30 / emoflowKpis.participantes) * 100)}%` : '—'}
-                  detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} estudiantes`}
-                />
-              </div>
-
-              <div className="grid md:grid-cols-2 gap-6">
-                <Seccion
-                  titulo="Distribución de uso"
-                  nota="Ingresos = veces que el estudiante entró al sistema (acumulado). Cubre 757 de los 777 activos (97%).">
-                  <GraficoBarras
-                    datos={emoflowBandas}
-                    dataKey="participantes"
-                    nombre="Estudiantes"
-                    color={C.azul2}
-                  />
-                </Seccion>
-
-                <Seccion
-                  titulo="¿El que más entra, aprueba más?"
-                  nota="% de aprobación de cada banda de uso.">
-                  <GraficoBarras
-                    datos={emoflowBandas}
-                    dataKey="pct_aprobacion"
-                    nombre="Aprobación %"
-                    color={C.verde}
-                    dominioMax={100}
-                  />
-                  <p className="text-xs text-slate-400 mt-2">
-                    La relación es real pero suave: quienes menos entran aprueban ~82% y quienes más
-                    entran ~88%. Sirve para detectar el extremo bajo, no como predictor fino.
-                  </p>
-                </Seccion>
-              </div>
-
-              {!ciudadElegida && (
-                <Seccion titulo="Uso por ciudad" nota="Promedio de ingresos al sistema por grupo operativo.">
-                  <GraficoBarras
-                    datos={emoflowCiudades}
-                    dataKey="ingresos_promedio"
-                    nombre="Ingresos promedio"
-                    color={C.naranja}
-                    rotarEtiquetas
-                  />
-                </Seccion>
-              )}
-
-              {!ciudadElegida && datos.historialEmoflow.length > 0 && (
-                <Seccion
-                  titulo="Evolución de ingresos al sistema"
-                  nota={datos.historialEmoflow.length < 3
-                    ? `Serie nueva — arrancó el ${datos.historialEmoflow[0].fecha}, crece un punto por día con el sync automático. Con pocos días el gráfico se ve casi plano; se vuelve útil a medida que se acumulan semanas.`
-                    : 'Promedio nacional de ingresos al sistema (acumulado), un punto por día del sync automático.'}
-                >
-                  <GraficoHistorial
-                    historial={datos.historialEmoflow.map((h) => ({
-                      fecha: h.fecha,
-                      curso: 'Ingresos promedio',
-                      valor: h.ingresos_promedio != null ? Number(h.ingresos_promedio) : null,
-                    }))}
-                    metrica="ingresos_promedio"
-                    nombreMetrica="Ingresos promedio"
-                  />
-                </Seccion>
-              )}
-
-              {/* % de participación (Completado/Real de la semana en curso del formulario
-                  Emoflow) — distinto de "ingresos al sistema" arriba. Fuente: bloque EMOFLOW
-                  de la pestaña Estadísticas (BD Seguimiento de Monitorias), sync diario. */}
-              {!ciudadElegida && participacionUltima.datos.length > 0 && (
-                <Seccion
-                  titulo={`% de participación — Semana ${participacionUltima.semana ?? '—'}`}
-                  nota={`Completado / Real de la encuesta semanal Emoflow por ciudad (corte ${participacionUltima.fecha}). Distinto de "ingresos al sistema": aquí se mide si diligenciaron el formulario de esa semana.`}
-                >
-                  <GraficoBarras
-                    datos={participacionUltima.datos}
-                    dataKey="avance_pct"
-                    nombre="Participación %"
-                    color={C.azul3}
-                    dominioMax={100}
-                    rotarEtiquetas
-                  />
-                </Seccion>
-              )}
-
-              {!ciudadElegida && participacionEvolucion.length > 0 && (
-                <Seccion
-                  titulo="Evolución de la participación semanal"
-                  nota='Check-ins registrados por ciudad y semana (Semana 1 en adelante). La última semana es la que está en curso, por eso aparece más baja. Fuente: registro semanal Emoflow.'
-                >
-                  <GraficoHistorial
-                    historial={participacionEvolucion}
-                    metrica="completado"
-                    nombreMetrica="Check-ins"
-                  />
-                </Seccion>
-              )}
-            </>
-          ) : (
-            <Seccion titulo="Emoflow">
-              <p className="text-sm text-slate-500">Sin datos de Emoflow para esta selección.</p>
-            </Seccion>
-          )}
-        </>
-      )}
+      {tab === 'Asistencia' && (() => {
+        const filas = pubAsistenciaFiltrada;
+        if (filas.length === 0) {
+          return <NoAplica motivo="sin datos de asistencia suficientes para este filtro (cohorte/estado/ciudad elegidos)." suave />;
+        }
+        const nTotal = filas.reduce((s, f) => s + (f.n_estudiantes ?? 0), 0);
+        const sumaPond = filas.reduce((s, f) => s + Number(f.promedio ?? 0) * (f.n_estudiantes ?? 0), 0);
+        const promedioGlobal = nTotal ? sumaPond / nTotal : null;
+        const porCiudad = !ciudadElegida
+          ? Array.from(
+              filas.reduce((mapa, f) => {
+                if (!f.grupo_ciudad) return mapa;
+                const acc = mapa.get(f.grupo_ciudad) ?? { n: 0, suma: 0 };
+                if (f.n_estudiantes != null && f.promedio != null) {
+                  acc.n += f.n_estudiantes;
+                  acc.suma += Number(f.promedio) * f.n_estudiantes;
+                }
+                mapa.set(f.grupo_ciudad, acc);
+                return mapa;
+              }, new Map<string, { n: number; suma: number }>()),
+            ).map(([grupo, { n, suma }]) => ({
+              etiqueta: ETIQUETA_GRUPO[grupo] ?? grupo,
+              promedio: n ? suma / n : 0,
+            }))
+          : [];
+        return (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              <Kpi
+                titulo="Asistencia promedio"
+                valor={promedioGlobal != null ? `${promedioGlobal.toFixed(1)}%` : '—'}
+                detalle={`${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`}
+              />
+              <Kpi titulo="Estudiantes con dato" valor={nTotal.toLocaleString('es-CO')} detalle="con registro de asistencia Zoom validada" />
+            </div>
+            {porCiudad.length > 0 && (
+              <Seccion titulo="Asistencia promedio por ciudad">
+                <GraficoBarras datos={porCiudad} dataKey="promedio" nombre="Asistencia %" color={C.azul2} dominioMax={100} rotarEtiquetas />
+              </Seccion>
+            )}
+            <p className="text-xs text-slate-400 mt-2">
+              Primera vez que esta fuente (asistencia validada por correo/cédula contra Zoom) es
+              pública — antes solo la consumía la herramienta interna de riesgo. Celdas con menos
+              de 5 estudiantes se suprimen (mismo criterio de privacidad del resto del panel).
+            </p>
+          </>
+        );
+      })()}
       </div>
     </>
   );
