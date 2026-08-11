@@ -1018,18 +1018,22 @@ export default function Pagina() {
       {tab === 'Resumen' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3 mb-5">
-            {esActual && kpis.cifraEstado !== null ? (
+            {kpis.cifraEstado !== null && (esActual || !hayFiltroCiudad) ? (
               <Kpi
-                titulo={`${ETIQUETA_ESTADO[estado]} ${NOMBRE_PROGRAMA[programa]}`}
+                titulo={
+                  esActual
+                    ? `${ETIQUETA_ESTADO[estado]} ${NOMBRE_PROGRAMA[programa]}`
+                    : `${estado === 'activos' ? 'Culminantes' : estado === 'retirados' ? 'Retirados' : 'Ingresados'} ${NOMBRE_PROGRAMA[programa]}`
+                }
                 valor={String(kpis.cifraEstado)}
                 detalle={
                   estado === 'todos'
-                    ? `Cohorte ${cohorte} completa: ${kpis.ingresados} ingresados (canónico Q10, base de aprobación)`
+                    ? `Cohorte ${cohorte} completa: ${kpis.ingresados} ingresados (canon oficial)`
                     : estado === 'retirados'
-                      ? `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canónico Q10)`
+                      ? `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canon oficial)`
                       : kpis.usarActualesSeguimiento
                         ? `Actuales en Seguimiento — suma exacta por ciudad. La cohorte canónica Q10 cuenta ${kpis.activos}; la diferencia son retiros por confirmar (ver "Retiro probable").`
-                        : `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte}`
+                        : `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canon oficial)`
                 }
               />
             ) : (
