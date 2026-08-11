@@ -19,30 +19,20 @@ npm run dev        # http://localhost:3000
 npm run build      # genera out/ (export estático)
 ```
 
-## Deploy (Netlify)
-
-1. Conectar este repo en Netlify → "Import from Git".
-2. La configuración viene de `netlify.toml` (build `npm run build`, publish `out`).
-3. Sin variables de entorno obligatorias: el anon key (público por diseño) tiene
-   default en `lib/api.ts`; se puede sobreescribir con `NEXT_PUBLIC_SUPABASE_URL`
-   y `NEXT_PUBLIC_SUPABASE_ANON_KEY`.
-
 ## Deploy (Vercel)
 
-Export estático puro (`output: 'export'` en `next.config.mjs`), sin SSR ni API routes —
-Vercel lo detecta solo, no hace falta `vercel.json`:
+**Netlify dado de baja 2026-08-11 — el deploy es solo Vercel.** Export estático puro
+(`output: 'export'` en `next.config.mjs`), sin SSR ni API routes — Vercel lo detecta solo, no hace
+falta `vercel.json`.
 
-1. En el dashboard de Vercel: "Add New… → Project" → importar este mismo repo de GitHub
-   (`comunicaciones-ai/Panel-De-Datos`, remote `comunicaciones` en este clon local).
-2. Framework Preset: se autodetecta "Next.js" — dejar Build Command y Output Directory
-   en su valor por defecto (Vercel reconoce `output: 'export'` y sirve el export estático
-   solo; si el formulario insiste en pedir Output Directory a mano, es `out`).
-3. Variables de entorno: igual que en Netlify, **no son obligatorias** — el anon key
-   público ya tiene default en `lib/api.ts`. Solo agregar `NEXT_PUBLIC_SUPABASE_URL` /
-   `NEXT_PUBLIC_SUPABASE_ANON_KEY` si se quiere sobreescribirlo.
-4. Deploy. Cada push a `main` en `comunicaciones-ai/Panel-De-Datos` vuelve a desplegar
-   solo, igual que ya pasa con Netlify — los dos deploys pueden convivir apuntando al
-   mismo repo mientras se decide si Netlify se da de baja.
+- **Repo de deploy:** `Samuel-Rojas-Monroy-Official-Repository/panel_de_datos` (remote
+  `samuel_oficial` en este clon local). Cada push a su `main` redespliega solo:
+  `git push samuel_oficial HEAD:main`.
+- Framework Preset: se autodetecta "Next.js" — Build Command y Output Directory por defecto
+  (Vercel reconoce `output: 'export'`; si el formulario pide Output Directory a mano, es `out`).
+- Variables de entorno: **no son obligatorias** — el anon key público ya tiene default en
+  `lib/api.ts`. Solo agregar `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` para
+  sobreescribirlo.
 
 ## Seguridad
 

@@ -1,5 +1,0 @@
-# Deploy estático: Next.js con output:'export' genera "out/".
-# Sin plugin ni funciones — todo el dato se consulta client-side a Supabase.
-[build]
-command = "npm run build"
-publish = "out"
