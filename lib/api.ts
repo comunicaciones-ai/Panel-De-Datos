@@ -466,6 +466,12 @@ export interface Datos {
   pubEmprendimiento: PubEmprendimiento[];
   pubAsistencia: PubAsistencia[];
   pubSeguimiento: PubSeguimiento[];
+  // v_pub_cohorte: canon oficial por cohorte (ingresados/activos/retirados/pct_aprobados).
+  // Cerradas 2019–2025 desde cohorte_historico (culminantes+retirados=seleccionados); viva 2026
+  // desde en_seguimiento_jc. Es la ÚNICA fuente con todos los años — cohorte_ingresos solo tiene
+  // la viva. Se usa como fallback de `ingresos` para que las cohortes cerradas muestren el canon
+  // (misma vista que panel_control_gui.py). NO recalcular por matrícula (contrato de datos).
+  pubCohorte: CohorteIngresos[];
   // Emoflow serie diaria/semanal real + JC retiro probable/aprobación ajustada (producción jul-2026).
   emoflowActividadSemanal: EmoflowActividadSemanal[];
   emoflowDiario: EmoflowIngresoDiario[];
@@ -484,7 +490,7 @@ export interface Datos {
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -526,8 +532,9 @@ export async function cargarTodo(): Promise<Datos> {
       leer<EmoflowBanda>('v_emoflow_bandas_retirado?order=orden.asc'),
       leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad_retirado?order=orden.asc'),
       leer<PubSeguimiento>('v_pub_seguimiento'),
+      leer<CohorteIngresos>('v_pub_cohorte'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {

@@ -593,8 +593,14 @@ export default function Pagina() {
     }));
   }, [datos, cohorte, programa]);
 
+  // cohorte_ingresos solo tiene la cohorte viva; para las cerradas (2019–2025) el canon oficial
+  // vive en v_pub_cohorte (mismo dato que el banner de panel_control_gui.py). Fallback → las
+  // tarjetas de cohortes cerradas muestran ingresados/culminantes/retirados/retención del canon
+  // en vez de quedar en blanco. La viva (2026) sigue tomando cohorte_ingresos (idéntico al canon).
   const ingresosProg = useMemo(
-    () => datos?.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa),
+    () =>
+      datos?.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa) ??
+      datos?.pubCohorte.find((i) => i.cohorte === cohorte && i.programa === programa),
     [datos, cohorte, programa],
   );
 
