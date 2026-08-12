@@ -225,13 +225,18 @@ export default function Pagina() {
     if (estado !== 'activos' && unidadEstadoCohorte === 'estudiantes') setUnidadEstadoCohorte('matriculas');
   }, [estado, unidadEstadoCohorte]);
 
-  const cohortes = useMemo(
-    () =>
-      datos
-        ? Array.from(new Set(datos.cursos.map((c) => c.cohorte))).sort().reverse()
-        : [],
-    [datos],
-  );
+  // Unión de cohortes CON matrícula (datos.cursos) y cohortes SOLO-CANON (datos.pubCohorte,
+  // ej. JC 2019-2022: Q10 no existía, no hay personas cargadas, pero sí el agregado oficial
+  // de cohorte_historico) — 2026-08-12, ver docs/procesos/plan-enriquecimiento-final-2026-08-12.md.
+  // Filtrado por `programa`: antes esta lista mezclaba cohortes de JC y MR sin distinguir
+  // (ambos leían el mismo set global de datos.cursos), lo que hacía aparecer p.ej. "2023"/"2024"
+  // como pestañas de MR aunque MR nunca tuvo cursos esos años — corregido de paso.
+  const cohortes = useMemo(() => {
+    if (!datos) return [];
+    const deCursos = datos.cursos.filter((c) => c.programa === programa).map((c) => c.cohorte);
+    const deCanon = datos.pubCohorte.filter((c) => c.programa === programa).map((c) => c.cohorte);
+    return Array.from(new Set([...deCursos, ...deCanon])).sort().reverse();
+  }, [datos, programa]);
   const cohorteActual = cohortes[0] ?? '';
   const cohorte = cohorteElegida ?? cohorteActual;
   const esActual = cohorte === cohorteActual && cohorte !== '';
