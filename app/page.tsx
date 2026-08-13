@@ -1332,19 +1332,24 @@ export default function Pagina() {
       )}
 
       {tab === 'Retención' && (() => {
-        // Retención por ciudad — distribuye la retención/deserción del canon a lo largo de las
-        // ciudades y las rankea, para dar seguimiento a cuáles retienen mejor. Fuente:
-        // v_pub_retencion_ciudad (activos+retirados por ciudad, suman al canon). Solo cohorte
-        // vigente: el canon de cohortes cerradas no tiene desglose por ciudad. Lee en vivo → se
-        // actualiza con cada sync.
-        if (datos.retencionCiudad.length === 0) {
-          return <EnConstruccion detalle="La retención por ciudad requiere una vista nueva en la base de datos (v_pub_retencion_ciudad) que aún no se ha aplicado. En cuanto se aplique, esta pestaña se activa sola — el panel lee en vivo." />;
-        }
-        // Solo cohorte vigente: el desglose por ciudad de activos (Seguimiento) cuadra con el canon
-        // únicamente en la cohorte viva; en cerradas el canon no tiene desglose por ciudad.
-        if (!esActual) {
-          return <NoAplica motivo={`el desglose de retención por ciudad solo está disponible para la cohorte vigente — el canon oficial de cohortes cerradas no tiene desglose por ciudad. Estás en ${NOMBRE_PROGRAMA[programa]} · ${cohorte}.`} suave />;
-        }
+        // HISTORIAL por cohorte (canon-exacto todos los años, v_pub_cohorte): retención =
+        // culminantes÷ingresados, deserción = retirados÷ingresados. Siempre visible — es el
+        // historial confiable. El desglose POR CIUDAD solo es canon-exacto en la cohorte vigente
+        // (Q10 purgó inconsistente el detalle por ciudad de años cerrados → v_pub_retencion_ciudad
+        // sobrecuenta en cerradas; verificado 2026-08-13), así que ahí se muestra un aviso honesto.
+        const hist = datos.pubCohorte
+          .filter((c) => c.programa === programa && c.ingresados)
+          .map((c) => {
+            const ing = c.ingresados, act = c.activos ?? 0, ret = c.retirados ?? 0;
+            return {
+              etiqueta: c.cohorte, cohorte: c.cohorte,
+              ingresados: ing, culminantes: act, retirados: ret,
+              retencion: ing ? Math.round((1000 * act) / ing) / 10 : 0,
+              desercion: ing ? Math.round((1000 * ret) / ing) / 10 : 0,
+            };
+          })
+          .sort((a, b) => a.cohorte.localeCompare(b.cohorte));
+
         const filas = datos.retencionCiudad
           .filter((r) => r.programa === programa && r.cohorte === cohorte && r.retencion_pct != null && r.ingresados)
           .map((r) => ({
@@ -1356,56 +1361,100 @@ export default function Pagina() {
             desercion: r.ingresados ? Math.round((1000 * (r.retirados ?? 0)) / r.ingresados) / 10 : 0,
           }))
           .sort((a, b) => b.retencion - a.retencion);
-        if (filas.length === 0) {
-          return <NoAplica motivo={`el desglose de retención por ciudad solo está disponible para la cohorte vigente — el canon oficial de cohortes cerradas no tiene desglose por ciudad. Estás en ${NOMBRE_PROGRAMA[programa]} · ${cohorte}.`} suave />;
-        }
+        const ciudadDisponible = esActual && filas.length > 0;
         const totalIng = filas.reduce((s, f) => s + f.ingresados, 0);
         const totalAct = filas.reduce((s, f) => s + f.activos, 0);
         const retGlobal = totalIng ? (100 * totalAct) / totalIng : 0;
         const mejor = filas[0];
         const peor = filas[filas.length - 1];
+
         return (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-              <Kpi titulo="Retención (cohorte)" valor={`${retGlobal.toFixed(1)}%`} detalle={`${totalAct} activos ÷ ${totalIng} ingresados`} acento={C.verde} />
-              <Kpi titulo="Deserción (cohorte)" valor={`${(100 - retGlobal).toFixed(1)}%`} detalle={`${totalIng - totalAct} retirados`} acento={C.rojo} />
-              <Kpi titulo="Mejor ciudad" valor={`${mejor.retencion.toFixed(1)}%`} detalle={`${mejor.etiqueta} — la que más retiene`} acento={C.verde} />
-              <Kpi titulo="Ciudad a intervenir" valor={`${peor.retencion.toFixed(1)}%`} detalle={`${peor.etiqueta} — la más baja`} acento={C.rojo} />
-            </div>
-            <Seccion
-              titulo={`Retención por ciudad — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
-              nota="Retención = activos ÷ ingresados de cada ciudad. Ordenadas de mayor a menor. Se actualiza con cada sync de los datos."
-            >
-              <GraficoBarras datos={filas} dataKey="retencion" nombre="Retención %" color={C.verde} dominioMax={100} rotarEtiquetas sufijoEtiqueta="%" decimalesEtiqueta={1} />
-            </Seccion>
-            <Seccion titulo="Detalle por ciudad">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="text-left text-slate-500 border-b border-slate-200">
-                      <th className="py-2 pr-4">Ciudad</th>
-                      <th className="py-2 pr-4 text-right">Ingresados</th>
-                      <th className="py-2 pr-4 text-right">Activos</th>
-                      <th className="py-2 pr-4 text-right">Retirados</th>
-                      <th className="py-2 pr-4 text-right">Retención</th>
-                      <th className="py-2 text-right">Deserción</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filas.map((f) => (
-                      <tr key={f.etiqueta} className="border-b border-slate-100">
-                        <td className="py-2 pr-4">{f.etiqueta}</td>
-                        <td className="py-2 pr-4 text-right">{f.ingresados}</td>
-                        <td className="py-2 pr-4 text-right">{f.activos}</td>
-                        <td className="py-2 pr-4 text-right">{f.retirados}</td>
-                        <td className="py-2 pr-4 text-right font-semibold" style={{ color: C.verde }}>{f.retencion.toFixed(1)}%</td>
-                        <td className="py-2 text-right" style={{ color: C.rojo }}>{f.desercion.toFixed(1)}%</td>
+            {/* Historial por cohorte — canon-exacto, todos los años */}
+            {hist.length > 0 && (
+              <Seccion
+                titulo={`Historial de retención por cohorte — ${NOMBRE_PROGRAMA[programa]}`}
+                nota="Retención = culminantes ÷ ingresados (canon oficial). Cifra exacta para todos los años — el mismo dato del Resumen."
+              >
+                <GraficoBarras datos={hist} dataKey="retencion" nombre="Retención %" color={C.verde} dominioMax={100} sufijoEtiqueta="%" decimalesEtiqueta={1} />
+                <div className="overflow-x-auto mt-3">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b border-slate-200">
+                        <th className="py-2 pr-4">Cohorte</th>
+                        <th className="py-2 pr-4 text-right">Ingresados</th>
+                        <th className="py-2 pr-4 text-right">Culminantes</th>
+                        <th className="py-2 pr-4 text-right">Retirados</th>
+                        <th className="py-2 pr-4 text-right">Retención</th>
+                        <th className="py-2 text-right">Deserción</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </Seccion>
+                    </thead>
+                    <tbody>
+                      {[...hist].reverse().map((h) => (
+                        <tr key={h.cohorte} className={`border-b border-slate-100 ${h.cohorte === cohorte ? 'bg-amber-50/40 font-medium' : ''}`}>
+                          <td className="py-2 pr-4">{h.cohorte}</td>
+                          <td className="py-2 pr-4 text-right">{h.ingresados}</td>
+                          <td className="py-2 pr-4 text-right">{h.culminantes}</td>
+                          <td className="py-2 pr-4 text-right">{h.retirados}</td>
+                          <td className="py-2 pr-4 text-right font-semibold" style={{ color: C.verde }}>{h.retencion.toFixed(1)}%</td>
+                          <td className="py-2 text-right" style={{ color: C.rojo }}>{h.desercion.toFixed(1)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Seccion>
+            )}
+
+            {/* Desglose POR CIUDAD — solo cohorte vigente (canon-exacto ahí) */}
+            {ciudadDisponible ? (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+                  <Kpi titulo="Retención (cohorte)" valor={`${retGlobal.toFixed(1)}%`} detalle={`${totalAct} activos ÷ ${totalIng} ingresados`} acento={C.verde} />
+                  <Kpi titulo="Deserción (cohorte)" valor={`${(100 - retGlobal).toFixed(1)}%`} detalle={`${totalIng - totalAct} retirados`} acento={C.rojo} />
+                  <Kpi titulo="Mejor ciudad" valor={`${mejor.retencion.toFixed(1)}%`} detalle={`${mejor.etiqueta} — la que más retiene`} acento={C.verde} />
+                  <Kpi titulo="Ciudad a intervenir" valor={`${peor.retencion.toFixed(1)}%`} detalle={`${peor.etiqueta} — la más baja`} acento={C.rojo} />
+                </div>
+                <Seccion
+                  titulo={`Retención por ciudad — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
+                  nota="Retención = activos ÷ ingresados de cada ciudad. Ordenadas de mayor a menor. Se actualiza con cada sync."
+                >
+                  <GraficoBarras datos={filas} dataKey="retencion" nombre="Retención %" color={C.verde} dominioMax={100} rotarEtiquetas sufijoEtiqueta="%" decimalesEtiqueta={1} />
+                </Seccion>
+                <Seccion titulo="Detalle por ciudad">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-slate-500 border-b border-slate-200">
+                          <th className="py-2 pr-4">Ciudad</th>
+                          <th className="py-2 pr-4 text-right">Ingresados</th>
+                          <th className="py-2 pr-4 text-right">Activos</th>
+                          <th className="py-2 pr-4 text-right">Retirados</th>
+                          <th className="py-2 pr-4 text-right">Retención</th>
+                          <th className="py-2 text-right">Deserción</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filas.map((f) => (
+                          <tr key={f.etiqueta} className="border-b border-slate-100">
+                            <td className="py-2 pr-4">{f.etiqueta}</td>
+                            <td className="py-2 pr-4 text-right">{f.ingresados}</td>
+                            <td className="py-2 pr-4 text-right">{f.activos}</td>
+                            <td className="py-2 pr-4 text-right">{f.retirados}</td>
+                            <td className="py-2 pr-4 text-right font-semibold" style={{ color: C.verde }}>{f.retencion.toFixed(1)}%</td>
+                            <td className="py-2 text-right" style={{ color: C.rojo }}>{f.desercion.toFixed(1)}%</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Seccion>
+              </>
+            ) : datos.retencionCiudad.length === 0 ? (
+              <EnConstruccion detalle="El desglose por ciudad requiere la vista v_pub_retencion_ciudad, que aún no se ha aplicado en la base de datos. El historial por cohorte de arriba sí funciona." />
+            ) : (
+              <NoAplica motivo={`el desglose POR CIUDAD solo está disponible para la cohorte vigente (${cohorteActual}). Q10 no conserva el detalle por ciudad de años cerrados, así que mostrarlo daría cifras que no cuadran con el canon. El historial por cohorte de arriba cubre todos los años de forma exacta.`} suave />
+            )}
           </>
         );
       })()}
