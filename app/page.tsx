@@ -128,6 +128,14 @@ function EstadoStat(
   );
 }
 
+// Color semáforo de una retención (%) para pintarla en los botones de ciudad: verde alto, ámbar
+// medio, rojo bajo. Umbrales alineados con la lectura de riesgo del equipo.
+function colorRetencion(pct: number): string {
+  if (pct >= 90) return C.verde;
+  if (pct >= 80) return C.naranja;
+  return C.rojo;
+}
+
 function Seccion({ titulo, nota, children }: { titulo: string; nota?: string; children: React.ReactNode }) {
   return (
     <motion.section
@@ -278,6 +286,23 @@ export default function Pagina() {
       .sort((a, b) => b[1] - a[1])
       .map(([grupo, total]) => ({ grupo, total }));
   }, [geografiaProg]);
+
+  // Retención por ciudad para pintarla en los botones del selector del Resumen (pedido de Samuel
+  // 2026-08-13): cada ciudad visible muestra su % de retención, y "Todas" el global. Solo en la
+  // cohorte vigente (v_pub_retencion_ciudad es canon-exacta solo ahí; en cerradas no hay ciudad).
+  const retencionPorCiudad = useMemo(() => {
+    const mapa = new Map<string, number>();
+    if (!datos || !esActual) return { mapa, total: null as number | null };
+    let sa = 0, si = 0;
+    datos.retencionCiudad
+      .filter((r) => r.programa === programa && r.cohorte === cohorte && r.retencion_pct != null && r.ingresados)
+      .forEach((r) => {
+        mapa.set(r.grupo_ciudad, Number(r.retencion_pct));
+        sa += r.activos ?? 0;
+        si += r.ingresados ?? 0;
+      });
+    return { mapa, total: si ? Math.round((1000 * sa) / si) / 10 : null };
+  }, [datos, programa, cohorte, esActual]);
 
   const municipiosGrupo = useMemo(
     () =>
@@ -969,8 +994,13 @@ export default function Pagina() {
                 }`}
               >
                 Todas
+                {retencionPorCiudad.total != null && (
+                  <span className="font-bold" style={{ color: colorRetencion(retencionPorCiudad.total) }}> · {retencionPorCiudad.total}%</span>
+                )}
               </button>
-              {gruposGeografia.map(({ grupo, total }) => (
+              {gruposGeografia.map(({ grupo, total }) => {
+                const ret = retencionPorCiudad.mapa.get(grupo);
+                return (
                 <button
                   key={grupo}
                   onClick={() => { setCiudadElegida(grupo); setMunicipioElegido(null); }}
@@ -979,9 +1009,18 @@ export default function Pagina() {
                   }`}
                 >
                   {ETIQUETA_GRUPO[grupo] ?? grupo} · {total}
+                  {ret != null && (
+                    <span className="font-bold" style={{ color: colorRetencion(ret) }}> · {ret}%</span>
+                  )}
                 </button>
-              ))}
+                );
+              })}
             </div>
+            {retencionPorCiudad.total != null && (
+              <p className="text-[11px] text-slate-400 px-1">
+                Cada ciudad: <b>personas activas</b> · <b style={{ color: C.verde }}>% retención</b> (verde ≥90 · ámbar ≥80 · rojo &lt;80).
+              </p>
+            )}
             {ciudadElegida && municipiosGrupo.length > 1 && (
               <div className="flex gap-1 flex-wrap pl-2 border-l-2 border-slate-200/70">
                 <button
