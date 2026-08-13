@@ -1023,6 +1023,21 @@ export default function Pagina() {
       {tab === 'Resumen' && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-5 gap-3 mb-5">
+            {!esActual && !hayFiltroCiudad && kpis.ingresados != null ? (
+              // COHORTE CERRADA → header 100% CANON (v_pub_cohorte), idéntico a panel_control_gui
+              // (fuente verificada por el equipo). NO se usa v_programa_stats aquí: esa vista incluye
+              // staff + perfiles de prueba (737 vs 722 en 2025) y arrastra cifras viejas sin reconciliar
+              // (2024=470 vs 608). El filtro Estado sigue disponible; en cohorte cerrada todas las cifras
+              // canónicas se muestran juntas (activos/retirados/ingresados), como en el GUI.
+              <>
+                <Kpi titulo={`Ingresados ${NOMBRE_PROGRAMA[programa]}`} valor={String(kpis.ingresados)} detalle={`Cohorte ${cohorte} — universo oficial (canon, sin staff ni pruebas)`} />
+                <Kpi titulo="Retención" valor={kpis.pctAprobados && kpis.pctAprobados !== '—' ? kpis.pctAprobados : '—'} detalle="culminantes ÷ ingresados (canon)" />
+                <Kpi titulo="Culminantes" valor={kpis.activos != null ? String(kpis.activos) : '—'} detalle="terminaron el programa (canon)" />
+                <Kpi titulo="Retirados" valor={kpis.retirados != null ? String(kpis.retirados) : '—'} detalle={kpis.ingresados ? `${Math.round((100 * (kpis.retirados ?? 0)) / kpis.ingresados)}% de los ingresados` : 'canon oficial'} />
+                <Kpi titulo="Cursos" valor={String(cursosProg.length)} detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${cohorte}`} />
+              </>
+            ) : (
+              <>
             {kpis.cifraEstado !== null && (esActual || !hayFiltroCiudad) ? (
               <Kpi
                 titulo={
@@ -1081,6 +1096,8 @@ export default function Pagina() {
                 valor={String(cursosProg.length)}
                 detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${cohorte}`}
               />
+            )}
+              </>
             )}
           </div>
           {kpis.esCanonico && kpis.estadoCohorte && (
@@ -1581,7 +1598,20 @@ export default function Pagina() {
         )
       )}
 
-      {tab === 'Demografía' && (
+      {tab === 'Demografía' && estado === 'retirados' ? (
+        // Demografía por RETIRADOS: el equipo juzga esta fuente poco confiable para el segmento de
+        // retirados (cobertura sociodemográfica parcial de quienes ya salieron) → se marca en
+        // validación en vez de mostrar barras que no representan al universo de retiros del canon.
+        <div className="rounded-xl border border-dashed border-amber-300/70 bg-amber-50/40 p-6 text-center">
+          <p className="text-sm font-semibold text-amber-700">🚧 Vista en validación</p>
+          <p className="text-sm text-slate-500 mt-1 max-w-xl mx-auto">
+            La demografía del segmento <b>Retirados</b> aún se está trabajando: la información
+            sociodemográfica de quienes ya salieron del programa es parcial y todavía no representa
+            de forma fiable al total de retiros del canon. Para el desglose demográfico usá el filtro
+            <b> Activos</b> o <b>Todos</b>.
+          </p>
+        </div>
+      ) : tab === 'Demografía' ? (
         <>
           <p className="text-xs text-slate-400 mb-4">
             {NOMBRE_PROGRAMA[programa]} · {cohorte} · {ETIQUETA_ESTADO[estado]}
@@ -1602,7 +1632,7 @@ export default function Pagina() {
             )}
           </div>
         </>
-      )}
+      ) : null}
 
       {tab === 'Asistencia' && (() => {
         const filas = pubAsistenciaFiltrada;
