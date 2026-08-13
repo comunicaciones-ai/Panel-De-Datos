@@ -1044,8 +1044,8 @@ export default function Pagina() {
               // canónicas se muestran juntas (activos/retirados/ingresados), como en el GUI.
               <>
                 <Kpi titulo={`Ingresados ${NOMBRE_PROGRAMA[programa]}`} valor={String(kpis.ingresados)} detalle={`Cohorte ${cohorte} — universo oficial (canon, sin staff ni pruebas)`} />
-                <Kpi titulo="Retención" valor={kpis.ingresados ? `${Math.round((100 * (kpis.activos ?? 0)) / kpis.ingresados)}%` : '—'} detalle="culminantes ÷ ingresados (canon)" acento={C.verde} />
-                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${Math.round((100 * (kpis.retirados ?? 0)) / kpis.ingresados)}%` : '—'} detalle="retirados ÷ ingresados (canon)" acento={C.rojo} />
+                <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * (kpis.activos ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} detalle="culminantes ÷ ingresados (canon)" acento={C.verde} />
+                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * (kpis.retirados ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} detalle="retirados ÷ ingresados (canon)" acento={C.rojo} />
                 <Kpi titulo="Culminantes" valor={kpis.activos != null ? String(kpis.activos) : '—'} detalle="terminaron el programa (canon)" />
                 <Kpi titulo="Retirados" valor={kpis.retirados != null ? String(kpis.retirados) : '—'} detalle="se retiraron (canon)" />
                 <Kpi titulo="Cursos" valor={String(cursosProg.length)} detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${cohorte}`} />
@@ -1091,8 +1091,8 @@ export default function Pagina() {
                 (no bajo filtro de ciudad, que no tiene desglose canónico). Complementos: suman 100%. */}
             {kpis.ingresados != null && kpis.activos != null && kpis.retirados != null && (
               <>
-                <Kpi titulo="Retención" valor={kpis.ingresados ? `${Math.round((100 * kpis.activos) / kpis.ingresados)}%` : '—'} detalle={`${kpis.activos} activos ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.verde} />
-                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${Math.round((100 * kpis.retirados) / kpis.ingresados)}%` : '—'} detalle={`${kpis.retirados} retirados ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.rojo} />
+                <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * kpis.activos) / kpis.ingresados).toFixed(1)}%` : '—'} detalle={`${kpis.activos} activos ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.verde} />
+                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * kpis.retirados) / kpis.ingresados).toFixed(1)}%` : '—'} detalle={`${kpis.retirados} retirados ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.rojo} />
               </>
             )}
             <Kpi
