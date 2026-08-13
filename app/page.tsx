@@ -1458,6 +1458,49 @@ export default function Pagina() {
           <NoAplica motivo="el histórico diario no distingue cohortes — solo se muestra para la cohorte vigente." />
         ) : (
           <>
+            {(() => {
+              // Header de diagnóstico: valor ACTUAL + delta vs el inicio de la serie, con dirección
+              // (regla del escéptico: "último valor" solo, sin contexto de tendencia, no diagnostica).
+              const fuente = ciudadElegida && programa === 'jc' ? historialPorCiudad : historialProg;
+              const fechas = Array.from(new Set(fuente.map((h) => h.fecha))).sort();
+              if (fechas.length < 2) return null;
+              const ini = fechas[0];
+              const fin = fechas[fechas.length - 1];
+              const sumMat = (f: string) =>
+                fuente.filter((h) => h.fecha === f).reduce((s, h) => s + Number(h.matriculados ?? 0), 0);
+              const avgAv = (f: string) => {
+                const filas = fuente.filter((h) => h.fecha === f && h.promedio_avance != null);
+                const peso = filas.reduce((s, h) => s + Number(h.matriculados ?? 0), 0);
+                return peso ? filas.reduce((s, h) => s + Number(h.promedio_avance) * Number(h.matriculados ?? 0), 0) / peso : null;
+              };
+              const matFin = sumMat(fin), matIni = sumMat(ini), dMat = matFin - matIni;
+              const avFin = avgAv(fin), avIni = avgAv(ini);
+              const dAv = avFin != null && avIni != null ? avFin - avIni : null;
+              const flecha = (d: number) => (d > 0 ? '↑' : d < 0 ? '↓' : '→');
+              const signo = (d: number) => (d > 0 ? '+' : '');
+              const iniCorta = fechaCortaEs(ini) || ini.slice(5);
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-5">
+                  <Kpi
+                    titulo="Matriculados hoy"
+                    valor={matFin.toLocaleString('es-CO')}
+                    detalle={`${flecha(dMat)} ${signo(dMat)}${dMat.toLocaleString('es-CO')} desde ${iniCorta}`}
+                  />
+                  {avFin != null && (
+                    <Kpi
+                      titulo="Avance promedio hoy"
+                      valor={`${avFin.toFixed(1)}%`}
+                      detalle={dAv != null ? `${flecha(dAv)} ${signo(dAv)}${dAv.toFixed(1)} pts desde ${iniCorta}` : 'sin comparativo'}
+                    />
+                  )}
+                  <Kpi
+                    titulo="Periodo medido"
+                    valor={`${fechas.length} días`}
+                    detalle={`serie diaria desde ${iniCorta}`}
+                  />
+                </div>
+              );
+            })()}
             <Seccion
               titulo={`Evolución de matrículas — ${NOMBRE_PROGRAMA[programa]}${ciudadElegida ? ` · ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : ''}`}
               nota={
@@ -1689,12 +1732,12 @@ export default function Pagina() {
                 <Kpi
                   titulo="Activos (últimos 7 días)"
                   valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)}%` : '—'}
-                  detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} estudiantes`}
+                  detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} de ${emoflowKpis.participantes.toLocaleString('es-CO')} ${alcanceEmoflow === 'canonico' ? 'vigentes' : 'del histórico'}`}
                 />
                 <Kpi
                   titulo="En riesgo de abandono"
                   valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.inactivos30 / emoflowKpis.participantes) * 100)}%` : '—'}
-                  detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} sin entrar +30 días`}
+                  detalle={`${emoflowKpis.inactivos30.toLocaleString('es-CO')} de ${emoflowKpis.participantes.toLocaleString('es-CO')} sin entrar +30 días`}
                 />
                 <Kpi
                   titulo="Usar Emoflow → aprobar (Q10)"
