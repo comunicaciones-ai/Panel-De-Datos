@@ -1286,6 +1286,11 @@ export default function Pagina() {
         if (datos.retencionCiudad.length === 0) {
           return <EnConstruccion detalle="La retención por ciudad requiere una vista nueva en la base de datos (v_pub_retencion_ciudad) que aún no se ha aplicado. En cuanto se aplique, esta pestaña se activa sola — el panel lee en vivo." />;
         }
+        // Solo cohorte vigente: el desglose por ciudad de activos (Seguimiento) cuadra con el canon
+        // únicamente en la cohorte viva; en cerradas el canon no tiene desglose por ciudad.
+        if (!esActual) {
+          return <NoAplica motivo={`el desglose de retención por ciudad solo está disponible para la cohorte vigente — el canon oficial de cohortes cerradas no tiene desglose por ciudad. Estás en ${NOMBRE_PROGRAMA[programa]} · ${cohorte}.`} suave />;
+        }
         const filas = datos.retencionCiudad
           .filter((r) => r.programa === programa && r.cohorte === cohorte && r.retencion_pct != null && r.ingresados)
           .map((r) => ({
