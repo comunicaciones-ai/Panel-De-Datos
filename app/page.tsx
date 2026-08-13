@@ -155,6 +155,18 @@ function NoAplica({ motivo, suave = false }: { motivo: string; suave?: boolean }
   );
 }
 
+// Aviso "estamos trabajando en este panel" — para vistas cuyo dato existe pero el equipo aún no
+// considera confiable para el segmento elegido (ej. demografía/emprendimiento por Retirados). NO
+// dice "no existe" (sería falso): dice que se está validando. Ver docs/procesos/panel-datos-etl.
+function EnConstruccion({ detalle }: { detalle: string }) {
+  return (
+    <div className="rounded-xl border border-dashed border-amber-300/70 bg-amber-50/40 p-6 text-center">
+      <p className="text-sm font-semibold text-amber-700">🚧 Estamos trabajando en este panel</p>
+      <p className="text-sm text-slate-500 mt-1 max-w-xl mx-auto">{detalle}</p>
+    </div>
+  );
+}
+
 // Suma `total` (respeta null = celda suprimida por k-anonimato, se ignora en vez de contarla
 // como 0) por categoria, para una dimension de v_pub_demografia ya filtrada por
 // programa/cohorte/estado/ciudad.
@@ -1563,6 +1575,10 @@ export default function Pagina() {
       {tab === 'Emprendimiento' && (
         !emprendimientoAplicaPrograma ? (
           <NoAplica motivo="Mujeres ROFÉ no tiene la encuesta de diagnóstico de emprendimiento (esa medición es solo de Jóvenes creaTIvos)." />
+        ) : estado === 'retirados' ? (
+          // Emprendimiento por RETIRADOS: la encuesta de diagnóstico se aplicó al ingreso; para
+          // quienes ya se retiraron el dato es escaso y poco representativo → en construcción.
+          <EnConstruccion detalle="El diagnóstico de emprendimiento del segmento Retirados aún se está trabajando: la encuesta se levanta al ingreso y para quienes ya salieron el dato es escaso y poco representativo. Para ver el diagnóstico usá el filtro Activos o Todos." />
         ) : pubEmprendimientoFiltrada.length === 0 ? (
           <NoAplica motivo="sin datos para este filtro (cohorte/estado/ciudad elegidos)." suave />
         ) : (
@@ -1601,16 +1617,8 @@ export default function Pagina() {
       {tab === 'Demografía' && estado === 'retirados' ? (
         // Demografía por RETIRADOS: el equipo juzga esta fuente poco confiable para el segmento de
         // retirados (cobertura sociodemográfica parcial de quienes ya salieron) → se marca en
-        // validación en vez de mostrar barras que no representan al universo de retiros del canon.
-        <div className="rounded-xl border border-dashed border-amber-300/70 bg-amber-50/40 p-6 text-center">
-          <p className="text-sm font-semibold text-amber-700">🚧 Vista en validación</p>
-          <p className="text-sm text-slate-500 mt-1 max-w-xl mx-auto">
-            La demografía del segmento <b>Retirados</b> aún se está trabajando: la información
-            sociodemográfica de quienes ya salieron del programa es parcial y todavía no representa
-            de forma fiable al total de retiros del canon. Para el desglose demográfico usá el filtro
-            <b> Activos</b> o <b>Todos</b>.
-          </p>
-        </div>
+        // construcción en vez de mostrar barras que no representan al universo de retiros del canon.
+        <EnConstruccion detalle="La demografía del segmento Retirados aún se está trabajando: la información sociodemográfica de quienes ya salieron del programa es parcial y todavía no representa de forma fiable al total de retiros. Para el desglose demográfico usá el filtro Activos o Todos." />
       ) : tab === 'Demografía' ? (
         <>
           <p className="text-xs text-slate-400 mb-4">
