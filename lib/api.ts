@@ -24,6 +24,17 @@ async function leer<T>(recurso: string): Promise<T[]> {
   return resp.json();
 }
 
+// Igual que leer() pero NUNCA rompe el panel: si el recurso no existe todavía (ej. una vista
+// pública recién agregada que aún no se aplicó en Supabase) devuelve [] en vez de lanzar. Se usa
+// para vistas nuevas cuyo despliegue de datos va por detrás del despliegue del frontend.
+async function leerSeguro<T>(recurso: string): Promise<T[]> {
+  try {
+    return await leer<T>(recurso);
+  } catch {
+    return [];
+  }
+}
+
 // PostgREST corta en 1000 filas por request (aunque se pida limit mayor). Para tablas
 // grandes paginamos con el header Range hasta traer todo — si no, se pierden filas
 // (justo las más recientes cuando el orden es fecha.asc).
@@ -436,6 +447,20 @@ export interface PubSeguimiento {
   total: number | null;
 }
 
+// v_pub_retencion_ciudad (migración 046): retención por grupo_ciudad para la cohorte, agregada y
+// k-anon (supresión si ingresados<5). activos = personas activas por ciudad (Seguimiento en la
+// cohorte viva); retirados = retiros de esa cohorte cuyo participante tiene esa ciudad. Suman al
+// canon (JC 2026: Σactivos=750, Σretirados=82). Habilita el ranking de ciudades por retención.
+export interface RetencionCiudad {
+  programa: 'jc' | 'mr' | 'stand';
+  cohorte: string;
+  grupo_ciudad: string;
+  activos: number | null;
+  retirados: number | null;
+  ingresados: number | null;
+  retencion_pct: number | string | null;
+}
+
 export interface Datos {
   cohorte: CohorteStats[];
   cursos: CursoCompletion[];
@@ -466,6 +491,9 @@ export interface Datos {
   pubEmprendimiento: PubEmprendimiento[];
   pubAsistencia: PubAsistencia[];
   pubSeguimiento: PubSeguimiento[];
+  // Retención por ciudad (v_pub_retencion_ciudad, migración 046). Vacío hasta que la vista se
+  // aplique en Supabase — la pestaña Retención lo detecta y muestra "en construcción".
+  retencionCiudad: RetencionCiudad[];
   // v_pub_cohorte: canon oficial por cohorte (ingresados/activos/retirados/pct_aprobados).
   // Cerradas 2019–2025 desde cohorte_historico (culminantes+retirados=seleccionados); viva 2026
   // desde en_seguimiento_jc. Es la ÚNICA fuente con todos los años — cohorte_ingresos solo tiene
@@ -490,7 +518,7 @@ export interface Datos {
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -533,8 +561,9 @@ export async function cargarTodo(): Promise<Datos> {
       leer<EmoflowBandaCiudad>('v_emoflow_bandas_ciudad_retirado?order=orden.asc'),
       leer<PubSeguimiento>('v_pub_seguimiento'),
       leer<CohorteIngresos>('v_pub_cohorte'),
+      leerSeguro<RetencionCiudad>('v_pub_retencion_ciudad'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {

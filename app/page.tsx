@@ -30,8 +30,8 @@ type Programa = 'jc' | 'mr';
 // Todas las secciones están siempre disponibles (rediseño 2026-08-03): cada tab decide
 // internamente si tiene algo que mostrar o si debe explicar "No aplica" — ya no se ocultan
 // tabs según programa/cohorte (ver §1.4 y §2.2 de plan-rediseno-panel-datos-2026-07-30.md).
-type Tab = 'Resumen' | 'Cursos' | 'Demografía' | 'Historial' | 'Emprendimiento' | 'Emoflow' | 'Asistencia';
-const TABS: Tab[] = ['Resumen', 'Cursos', 'Demografía', 'Historial', 'Emprendimiento', 'Emoflow', 'Asistencia'];
+type Tab = 'Resumen' | 'Retención' | 'Cursos' | 'Demografía' | 'Historial' | 'Emprendimiento' | 'Emoflow' | 'Asistencia';
+const TABS: Tab[] = ['Resumen', 'Retención', 'Cursos', 'Demografía', 'Historial', 'Emprendimiento', 'Emoflow', 'Asistencia'];
 
 // Filtro global "Estado" (migración 037): reemplaza la exposición pasiva de
 // activos/retirados por un control real que se propaga a Resumen, Cursos, Demografía,
@@ -574,16 +574,6 @@ export default function Pagina() {
   // veces, en Resumen y en Cursos, con riesgo de desalinearse). Se consume igual en ambos tabs.
   const mostrarCanonico = esActual && aprobacionProg.length > 0;
 
-  // Retiro probable JC: personas fuera de Seguimiento (Sheet) que Q10 aún no marca retiradas
-  // oficialmente. Alerta complementaria, en duda hasta que Q10 lo confirme — no se mezcla con
-  // cohorte_ingresos.retirados (oficial). Solo existe para JC.
-  const retiroProbable = useMemo(
-    () =>
-      datos && programa === 'jc'
-        ? datos.retiroProbableJc.find((r) => r.cohorte === cohorte) ?? null
-        : null,
-    [datos, programa, cohorte],
-  );
 
   // Verificación cruzada: misma forma que aprobacion_cursos pero recalculada desde
   // enrollments + en_seguimiento_jc, para detectar si el pipeline oficial de Q10 se
@@ -1184,39 +1174,8 @@ export default function Pagina() {
               </div>
             </Seccion>
           )}
-          {/* Retiro probable JC — alerta complementaria (v_retiro_probable_jc), NO oficial:
-              gente que ya no está en la pestaña Seguimiento pero Q10 no la ha marcado retirada.
-              Pendiente de confirmar; no resta de cohorte_ingresos.retirados. */}
-          {esActual && programa === 'jc' && retiroProbable && retiroProbable.retiro_probable_total > 0 && (
-            <Seccion
-              titulo="Retiro probable (pendiente de confirmar en Q10)"
-              nota={`${retiroProbable.retiro_probable_total} persona(s) ya no aparecen en la pestaña Seguimiento del equipo, pero Q10 aún no las marca retiradas oficialmente — puede tratarse de un retiro real en trámite o de una falsa alarma. No se cuentan como retiradas oficiales hasta que Q10 lo confirme.`}
-            >
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                <EstadoStat
-                  etiqueta="Ya habían aprobado"
-                  valor={retiroProbable.retiro_probable_aprobado}
-                  total={retiroProbable.retiro_probable_total}
-                  color={C.amarillo}
-                  detalle="avance prom. > 80% antes de salir de Seguimiento"
-                />
-                <EstadoStat
-                  etiqueta="No habían aprobado"
-                  valor={retiroProbable.retiro_probable_no_aprobado}
-                  total={retiroProbable.retiro_probable_total}
-                  color={C.rojo}
-                  detalle="avance prom. ≤ 80%"
-                />
-                <EstadoStat
-                  etiqueta="Total en duda"
-                  valor={retiroProbable.retiro_probable_total}
-                  total={retiroProbable.retiro_probable_total}
-                  color={C.naranja}
-                  detalle={`avance promedio ${retiroProbable.avance_promedio ?? '—'}%`}
-                />
-              </div>
-            </Seccion>
-          )}
+          {/* El panel "Retiro probable" se retiró a pedido de Samuel (2026-08-13): info no
+              requerida en el resumen. El seguimiento por ciudad vive ahora en la pestaña Retención. */}
           {/* El desglose de aprobación (aprobados/retirados) sale de aprobacion_cursos, que no
               trae grupo_ciudad. Con una ciudad/municipio elegido caemos al gráfico de completación. */}
           {mostrarCanonico && !hayFiltroCiudad ? (
@@ -1317,6 +1276,80 @@ export default function Pagina() {
           )}
         </>
       )}
+
+      {tab === 'Retención' && (() => {
+        // Retención por ciudad — distribuye la retención/deserción del canon a lo largo de las
+        // ciudades y las rankea, para dar seguimiento a cuáles retienen mejor. Fuente:
+        // v_pub_retencion_ciudad (activos+retirados por ciudad, suman al canon). Solo cohorte
+        // vigente: el canon de cohortes cerradas no tiene desglose por ciudad. Lee en vivo → se
+        // actualiza con cada sync.
+        if (datos.retencionCiudad.length === 0) {
+          return <EnConstruccion detalle="La retención por ciudad requiere una vista nueva en la base de datos (v_pub_retencion_ciudad) que aún no se ha aplicado. En cuanto se aplique, esta pestaña se activa sola — el panel lee en vivo." />;
+        }
+        const filas = datos.retencionCiudad
+          .filter((r) => r.programa === programa && r.cohorte === cohorte && r.retencion_pct != null && r.ingresados)
+          .map((r) => ({
+            etiqueta: ETIQUETA_GRUPO[r.grupo_ciudad] ?? r.grupo_ciudad,
+            retencion: Number(r.retencion_pct),
+            activos: r.activos ?? 0,
+            retirados: r.retirados ?? 0,
+            ingresados: r.ingresados ?? 0,
+            desercion: r.ingresados ? Math.round((1000 * (r.retirados ?? 0)) / r.ingresados) / 10 : 0,
+          }))
+          .sort((a, b) => b.retencion - a.retencion);
+        if (filas.length === 0) {
+          return <NoAplica motivo={`el desglose de retención por ciudad solo está disponible para la cohorte vigente — el canon oficial de cohortes cerradas no tiene desglose por ciudad. Estás en ${NOMBRE_PROGRAMA[programa]} · ${cohorte}.`} suave />;
+        }
+        const totalIng = filas.reduce((s, f) => s + f.ingresados, 0);
+        const totalAct = filas.reduce((s, f) => s + f.activos, 0);
+        const retGlobal = totalIng ? (100 * totalAct) / totalIng : 0;
+        const mejor = filas[0];
+        const peor = filas[filas.length - 1];
+        return (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
+              <Kpi titulo="Retención (cohorte)" valor={`${retGlobal.toFixed(1)}%`} detalle={`${totalAct} activos ÷ ${totalIng} ingresados`} acento={C.verde} />
+              <Kpi titulo="Deserción (cohorte)" valor={`${(100 - retGlobal).toFixed(1)}%`} detalle={`${totalIng - totalAct} retirados`} acento={C.rojo} />
+              <Kpi titulo="Mejor ciudad" valor={`${mejor.retencion.toFixed(1)}%`} detalle={`${mejor.etiqueta} — la que más retiene`} acento={C.verde} />
+              <Kpi titulo="Ciudad a intervenir" valor={`${peor.retencion.toFixed(1)}%`} detalle={`${peor.etiqueta} — la más baja`} acento={C.rojo} />
+            </div>
+            <Seccion
+              titulo={`Retención por ciudad — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
+              nota="Retención = activos ÷ ingresados de cada ciudad. Ordenadas de mayor a menor. Se actualiza con cada sync de los datos."
+            >
+              <GraficoBarras datos={filas} dataKey="retencion" nombre="Retención %" color={C.verde} dominioMax={100} rotarEtiquetas sufijoEtiqueta="%" decimalesEtiqueta={1} />
+            </Seccion>
+            <Seccion titulo="Detalle por ciudad">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-slate-500 border-b border-slate-200">
+                      <th className="py-2 pr-4">Ciudad</th>
+                      <th className="py-2 pr-4 text-right">Ingresados</th>
+                      <th className="py-2 pr-4 text-right">Activos</th>
+                      <th className="py-2 pr-4 text-right">Retirados</th>
+                      <th className="py-2 pr-4 text-right">Retención</th>
+                      <th className="py-2 text-right">Deserción</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filas.map((f) => (
+                      <tr key={f.etiqueta} className="border-b border-slate-100">
+                        <td className="py-2 pr-4">{f.etiqueta}</td>
+                        <td className="py-2 pr-4 text-right">{f.ingresados}</td>
+                        <td className="py-2 pr-4 text-right">{f.activos}</td>
+                        <td className="py-2 pr-4 text-right">{f.retirados}</td>
+                        <td className="py-2 pr-4 text-right font-semibold" style={{ color: C.verde }}>{f.retencion.toFixed(1)}%</td>
+                        <td className="py-2 text-right" style={{ color: C.rojo }}>{f.desercion.toFixed(1)}%</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Seccion>
+          </>
+        );
+      })()}
 
       {tab === 'Cursos' && mostrarCanonico && (
         <>
