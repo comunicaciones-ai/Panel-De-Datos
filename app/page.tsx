@@ -291,13 +291,18 @@ export default function Pagina() {
   // 2026-08-13): cada ciudad visible muestra su % de retención, y "Todas" el global. Solo en la
   // cohorte vigente (v_pub_retencion_ciudad es canon-exacta solo ahí; en cerradas no hay ciudad).
   const retencionPorCiudad = useMemo(() => {
-    const mapa = new Map<string, number>();
+    const mapa = new Map<string, { pct: number; activos: number; retirados: number; ingresados: number }>();
     if (!datos || !esActual) return { mapa, total: null as number | null };
     let sa = 0, si = 0;
     datos.retencionCiudad
       .filter((r) => r.programa === programa && r.cohorte === cohorte && r.retencion_pct != null && r.ingresados)
       .forEach((r) => {
-        mapa.set(r.grupo_ciudad, Number(r.retencion_pct));
+        mapa.set(r.grupo_ciudad, {
+          pct: Number(r.retencion_pct),
+          activos: r.activos ?? 0,
+          retirados: r.retirados ?? 0,
+          ingresados: r.ingresados ?? 0,
+        });
         sa += r.activos ?? 0;
         si += r.ingresados ?? 0;
       });
@@ -1010,7 +1015,7 @@ export default function Pagina() {
                 >
                   {ETIQUETA_GRUPO[grupo] ?? grupo} · {total}
                   {ret != null && (
-                    <span className="font-bold" style={{ color: colorRetencion(ret) }}> · {ret}%</span>
+                    <span className="font-bold" style={{ color: colorRetencion(ret.pct) }}> · {ret.pct}%</span>
                   )}
                 </button>
                 );
@@ -1116,14 +1121,24 @@ export default function Pagina() {
                 }
               />
             )}
-            {/* Retención y Deserción — las dos métricas clave, siempre visibles cuando hay canon
-                (no bajo filtro de ciudad, que no tiene desglose canónico). Complementos: suman 100%. */}
-            {kpis.ingresados != null && kpis.activos != null && kpis.retirados != null && (
+            {/* Retención y Deserción — las dos métricas clave, como par de casillas verde/roja.
+                Sin filtro de ciudad → cifras de la cohorte (canon). Con una ciudad elegida → las
+                MISMAS casillas pero de esa ciudad (v_pub_retencion_ciudad), pedido de Samuel. */}
+            {kpis.ingresados != null && kpis.activos != null && kpis.retirados != null ? (
               <>
                 <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * kpis.activos) / kpis.ingresados).toFixed(1)}%` : '—'} detalle={`${kpis.activos} activos ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.verde} />
                 <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * kpis.retirados) / kpis.ingresados).toFixed(1)}%` : '—'} detalle={`${kpis.retirados} retirados ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.rojo} />
               </>
-            )}
+            ) : ciudadElegida && retencionPorCiudad.mapa.get(ciudadElegida) ? (() => {
+              const rc = retencionPorCiudad.mapa.get(ciudadElegida)!;
+              const ciu = ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida;
+              return (
+                <>
+                  <Kpi titulo={`Retención · ${ciu}`} valor={`${rc.pct.toFixed(1)}%`} detalle={`${rc.activos} activos ÷ ${rc.ingresados} ingresados`} acento={C.verde} />
+                  <Kpi titulo={`Deserción · ${ciu}`} valor={`${((100 * rc.retirados) / rc.ingresados).toFixed(1)}%`} detalle={`${rc.retirados} retirados ÷ ${rc.ingresados} ingresados`} acento={C.rojo} />
+                </>
+              );
+            })() : null}
             <Kpi
               titulo="Matrículas"
               valor={String(kpis.matriculas)}
