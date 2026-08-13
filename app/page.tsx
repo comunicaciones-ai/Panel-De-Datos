@@ -1308,6 +1308,27 @@ export default function Pagina() {
 
           {unidadEstadoCohorte === 'matriculas' ? (
             <>
+              {(() => {
+                // Header de diagnóstico. % de aprobación = aprobados÷cursaron AGREGADO (ratio pooled,
+                // NO promedio de tasas por curso — el escéptico del consejo advirtió que promediar
+                // cursos de tamaños dispares oculta el que colapsó). Además, el curso más crítico.
+                const cursaron = aprobacionProg.reduce((s, a) => s + totalPorEstado(a), 0);
+                const aprobaron = aprobacionProg.reduce((s, a) => s + aprobadosPorEstado(a), 0);
+                const pctAprob = cursaron ? Math.round((100 * aprobaron) / cursaron) : 0;
+                const conDato = aprobacionProg.filter((a) => totalPorEstado(a) > 0 && a.promedio != null);
+                const critico = conDato.length
+                  ? conDato.reduce((min, a) => (Number(a.promedio) < Number(min.promedio) ? a : min))
+                  : null;
+                return (
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+                    <Kpi titulo="Aprobación" valor={`${pctAprob}%`} detalle={`${aprobaron.toLocaleString('es-CO')} de ${cursaron.toLocaleString('es-CO')} matrículas con avance > 80%`} />
+                    <Kpi titulo="Matrículas" valor={cursaron.toLocaleString('es-CO')} detalle={`en ${aprobacionProg.length} cursos · ${ETIQUETA_ESTADO[estado].toLowerCase()}`} />
+                    {critico && (
+                      <Kpi titulo="Curso más crítico" valor={`${critico.promedio}%`} detalle={`${critico.curso.length > 32 ? critico.curso.slice(0, 31) + '…' : critico.curso} — menor avance promedio` } />
+                    )}
+                  </div>
+                );
+              })()}
               <Seccion
                 titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`}
                 nota="Cada barra suma la cohorte completa que cursó: aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro."
@@ -1485,6 +1506,23 @@ export default function Pagina() {
         ) : pubEmprendimientoFiltrada.length === 0 ? (
           <NoAplica motivo="sin datos para este filtro (cohorte/estado/ciudad elegidos)." suave />
         ) : (
+          <>
+          {(() => {
+            // Header de diagnóstico: total diagnosticados + % que YA emprende (en marcha) + %
+            // potencial (idea/interesado). Conteo Y % siempre (regla del escéptico). ORDEN_SITUACION
+            // = [en_marcha, idea, interesado, no_interesado].
+            const totalDiag = emprendimientoOrdenado.reduce((s, e) => s + e.total, 0);
+            const enMarcha = emprendimientoOrdenado[0]?.total ?? 0;
+            const potencial = (emprendimientoOrdenado[1]?.total ?? 0) + (emprendimientoOrdenado[2]?.total ?? 0);
+            const pct = (v: number) => (totalDiag ? Math.round((100 * v) / totalDiag) : 0);
+            return (
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+                <Kpi titulo="Ya emprende" valor={`${pct(enMarcha)}%`} detalle={`${enMarcha.toLocaleString('es-CO')} con emprendimiento en marcha`} />
+                <Kpi titulo="Potencial" valor={`${pct(potencial)}%`} detalle={`${potencial.toLocaleString('es-CO')} con idea o interesados`} />
+                <Kpi titulo="Diagnosticados" valor={totalDiag.toLocaleString('es-CO')} detalle={`Encuesta JC · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`} />
+              </div>
+            );
+          })()}
           <div className="grid md:grid-cols-2 gap-6">
             <Seccion titulo="Situación frente al emprendimiento" nota={`Encuesta de diagnóstico Jóvenes creaTIvos · ${cohorte} · ${ETIQUETA_ESTADO[estado]}.`}>
               <GraficoEmprendimiento datos={emprendimientoOrdenado} />
@@ -1496,6 +1534,7 @@ export default function Pagina() {
               </p>
             </Seccion>
           </div>
+          </>
         )
       )}
 
@@ -1547,6 +1586,11 @@ export default function Pagina() {
               promedio: n ? suma / n : 0,
             }))
           : [];
+        // Peor ciudad — el promedio nacional esconde la ciudad crítica (regla del escéptico del
+        // consejo): un directivo necesita ver "Cali 41%" para intervenir, no solo el agregado.
+        const peorCiudad = porCiudad.length
+          ? porCiudad.reduce((min, c) => (c.promedio < min.promedio ? c : min))
+          : null;
         return (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -1556,6 +1600,13 @@ export default function Pagina() {
                 detalle={`${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`}
               />
               <Kpi titulo="Estudiantes con dato" valor={nTotal.toLocaleString('es-CO')} detalle="con registro de asistencia Zoom validada" />
+              {peorCiudad && (
+                <Kpi
+                  titulo="Ciudad más baja"
+                  valor={`${peorCiudad.promedio.toFixed(1)}%`}
+                  detalle={`${peorCiudad.etiqueta} — la de menor asistencia; foco de intervención`}
+                />
+              )}
             </div>
             {porCiudad.length > 0 && (
               <Seccion titulo="Asistencia promedio por ciudad">
