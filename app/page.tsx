@@ -92,7 +92,7 @@ function fechaCortaEs(iso?: string | null): string | null {
   return `${d} de ${MESES_ES[m - 1]}`;
 }
 
-function Kpi({ titulo, valor, detalle }: { titulo: string; valor: string; detalle?: string }) {
+function Kpi({ titulo, valor, detalle, acento }: { titulo: string; valor: string; detalle?: string; acento?: string }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 14 }}
@@ -100,9 +100,10 @@ function Kpi({ titulo, valor, detalle }: { titulo: string; valor: string; detall
       viewport={{ once: true, margin: '-40px' }}
       transition={{ duration: 0.5 }}
       className="tarjeta-glass p-3"
+      style={acento ? { borderTop: `3px solid ${acento}` } : undefined}
     >
       <p className="text-xs uppercase tracking-wide text-slate-500">{titulo}</p>
-      <p className="text-2xl font-bold kpi-valor mt-1">{valor}</p>
+      <p className="text-2xl font-bold kpi-valor mt-1" style={acento ? { color: acento } : undefined}>{valor}</p>
       {detalle && <p className="text-xs text-slate-400 mt-1">{detalle}</p>}
     </motion.div>
   );
@@ -1043,9 +1044,10 @@ export default function Pagina() {
               // canónicas se muestran juntas (activos/retirados/ingresados), como en el GUI.
               <>
                 <Kpi titulo={`Ingresados ${NOMBRE_PROGRAMA[programa]}`} valor={String(kpis.ingresados)} detalle={`Cohorte ${cohorte} — universo oficial (canon, sin staff ni pruebas)`} />
-                <Kpi titulo="Retención" valor={kpis.pctAprobados && kpis.pctAprobados !== '—' ? kpis.pctAprobados : '—'} detalle="culminantes ÷ ingresados (canon)" />
+                <Kpi titulo="Retención" valor={kpis.ingresados ? `${Math.round((100 * (kpis.activos ?? 0)) / kpis.ingresados)}%` : '—'} detalle="culminantes ÷ ingresados (canon)" acento={C.verde} />
+                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${Math.round((100 * (kpis.retirados ?? 0)) / kpis.ingresados)}%` : '—'} detalle="retirados ÷ ingresados (canon)" acento={C.rojo} />
                 <Kpi titulo="Culminantes" valor={kpis.activos != null ? String(kpis.activos) : '—'} detalle="terminaron el programa (canon)" />
-                <Kpi titulo="Retirados" valor={kpis.retirados != null ? String(kpis.retirados) : '—'} detalle={kpis.ingresados ? `${Math.round((100 * (kpis.retirados ?? 0)) / kpis.ingresados)}% de los ingresados` : 'canon oficial'} />
+                <Kpi titulo="Retirados" valor={kpis.retirados != null ? String(kpis.retirados) : '—'} detalle="se retiraron (canon)" />
                 <Kpi titulo="Cursos" valor={String(cursosProg.length)} detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${cohorte}`} />
               </>
             ) : (
@@ -1084,6 +1086,14 @@ export default function Pagina() {
                       : `Cohorte ${cohorte} (histórico Q10 — no incluye retirados)`
                 }
               />
+            )}
+            {/* Retención y Deserción — las dos métricas clave, siempre visibles cuando hay canon
+                (no bajo filtro de ciudad, que no tiene desglose canónico). Complementos: suman 100%. */}
+            {kpis.ingresados != null && kpis.activos != null && kpis.retirados != null && (
+              <>
+                <Kpi titulo="Retención" valor={kpis.ingresados ? `${Math.round((100 * kpis.activos) / kpis.ingresados)}%` : '—'} detalle={`${kpis.activos} activos ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.verde} />
+                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${Math.round((100 * kpis.retirados) / kpis.ingresados)}%` : '—'} detalle={`${kpis.retirados} retirados ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.rojo} />
+              </>
             )}
             <Kpi
               titulo="Matrículas"
