@@ -424,6 +424,21 @@ export default function Pagina() {
   }, [datos, programa, cohorte, estado, ciudadElegida]);
   const emprendimientoAplicaPrograma = !!datos && datos.pubEmprendimiento.some((d) => d.programa === programa);
 
+  // Impacto financiero MR (Fase 2 ampliación PBI, migración 046, 2026-08-15) — la vista ya
+  // filtra programa='mr', acá solo aplicamos cohorte/estado/ciudad como en el resto del panel.
+  // Ojo (limitación conocida, misma que pubDemografia): la supresión n<5 se aplica POR CIUDAD
+  // antes de agregar, así que sumar entre ciudades puede subcontar un poco frente al total real
+  // sin desglosar — mismo trade-off ya aceptado en el resto del panel, no es nuevo acá.
+  const impactoFinancieroMrFiltrada = useMemo(() => {
+    if (!datos) return [];
+    return datos.impactoFinancieroMr.filter(
+      (d) =>
+        d.cohorte === cohorte &&
+        (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
+        (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
+    );
+  }, [datos, cohorte, estado, ciudadElegida]);
+
   const pubAsistenciaFiltrada = useMemo(() => {
     if (!datos) return [];
     return datos.pubAsistencia.filter(
@@ -1723,7 +1738,63 @@ export default function Pagina() {
         )
       )}
 
-      {tab === 'Emprendimiento' && (
+      {tab === 'Emprendimiento' && programa === 'mr' && (() => {
+        // Impacto financiero MR (Fase 2 ampliación PBI, 2026-08-15) — no es la encuesta de
+        // situación de JC (en_marcha/idea/interesado, esa es harina de otro costal); acá se
+        // muestra si tiene emprendimiento + acceso a microcrédito + banda de ingresos
+        // familiares. Ver docs/procesos/plan-ampliacion-panel-datos-2026-08-10.md.
+        if (impactoFinancieroMrFiltrada.length === 0) {
+          return <NoAplica motivo="sin datos de impacto financiero para este filtro (cohorte/estado/ciudad elegidos)." suave />;
+        }
+        const dimTotal = (dim: string, cat: string) =>
+          impactoFinancieroMrFiltrada.find((d) => d.dimension === dim && d.categoria === cat)?.total ?? 0;
+        const emprendeSi = dimTotal('tiene_emprendimiento', 'si');
+        const emprendeNo = dimTotal('tiene_emprendimiento', 'no');
+        const totalEmprendeConDato = emprendeSi + emprendeNo;
+        const pctEmprendimientoMr = totalEmprendeConDato ? Math.round((100 * emprendeSi) / totalEmprendeConDato) : 0;
+        const creditoSi = dimTotal('tiene_credito', 'si');
+        const creditoNo = dimTotal('tiene_credito', 'no');
+        const totalCreditoConDato = creditoSi + creditoNo;
+        const pctCreditoMr = totalCreditoConDato ? Math.round((100 * creditoSi) / totalCreditoConDato) : 0;
+        const ingresosFilas = impactoFinancieroMrFiltrada.filter((d) => d.dimension === 'ingresos_familiares');
+        const totalIngresosMr = ingresosFilas.reduce((s, d) => s + (d.total ?? 0), 0);
+        const emprendimientoPie = [
+          { nombre: 'Con emprendimiento', total: emprendeSi, color: C.verde },
+          { nombre: 'Sin emprendimiento', total: emprendeNo, color: C.amarillo },
+        ];
+        const creditoPie = [
+          { nombre: 'Con microcrédito', total: creditoSi, color: C.azul3 },
+          { nombre: 'Sin microcrédito', total: creditoNo, color: C.amarillo },
+        ];
+        const ingresosBarras = ingresosFilas
+          .map((d) => ({ etiqueta: d.categoria, total: d.total ?? 0 }))
+          .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
+        return (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
+              <Kpi titulo="Con emprendimiento" valor={`${pctEmprendimientoMr}%`} detalle={`${emprendeSi.toLocaleString('es-CO')} de ${totalEmprendeConDato.toLocaleString('es-CO')} con dato`} />
+              <Kpi titulo="Beneficiarias de crédito" valor={`${pctCreditoMr}%`} detalle={`${creditoSi.toLocaleString('es-CO')} con microcrédito`} />
+              <Kpi titulo="Con dato de ingresos" valor={totalIngresosMr.toLocaleString('es-CO')} detalle={`${cohorte} · ${ETIQUETA_ESTADO[estado]}`} />
+            </div>
+            <div className="grid md:grid-cols-2 gap-6">
+              <Seccion titulo="Emprendimiento" nota="Con emprendimiento = registra un emprendimiento con nombre en la BD.">
+                <GraficoEmprendimiento datos={emprendimientoPie} />
+              </Seccion>
+              <Seccion titulo="Acceso a microcrédito" nota="Beneficiarias con al menos un crédito registrado.">
+                <GraficoEmprendimiento datos={creditoPie} />
+              </Seccion>
+              <Seccion titulo="Ingresos familiares" nota="Banda autoreportada en el formulario de ingreso.">
+                <GraficoBarras datos={ingresosBarras} dataKey="total" nombre="Personas" color={C.azul2} rotarEtiquetas />
+              </Seccion>
+              <Seccion titulo="Sectores de emprendimiento">
+                <NoAplica motivo="no se captura el sector/rubro del emprendimiento, solo el nombre en texto libre — auditado 2026-08-15." />
+              </Seccion>
+            </div>
+          </>
+        );
+      })()}
+
+      {tab === 'Emprendimiento' && programa !== 'mr' && (
         !emprendimientoAplicaPrograma ? (
           <NoAplica motivo="Mujeres ROFÉ no tiene la encuesta de diagnóstico de emprendimiento (esa medición es solo de Jóvenes creaTIvos)." />
         ) : estado === 'retirados' ? (
