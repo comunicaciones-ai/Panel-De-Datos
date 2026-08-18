@@ -1115,7 +1115,7 @@ export default function Pagina() {
                     : estado === 'retirados'
                       ? `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canon oficial)`
                       : kpis.usarActualesSeguimiento
-                        ? `Actuales en Seguimiento — suma exacta por ciudad. La cohorte canónica Q10 cuenta ${kpis.activos}; la diferencia son retiros por confirmar (ver "Retiro probable").`
+                        ? `Actuales en Seguimiento — suma exacta por ciudad. La cohorte canónica Q10 cuenta ${kpis.activos}; la diferencia son retiros por confirmar.`
                         : `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canon oficial)`
                 }
               />
