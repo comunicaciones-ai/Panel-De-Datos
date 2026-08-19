@@ -1095,8 +1095,8 @@ export default function Pagina() {
               // canónicas se muestran juntas (activos/retirados/ingresados), como en el GUI.
               <>
                 <Kpi titulo={`Ingresados ${NOMBRE_PROGRAMA[programa]}`} valor={String(kpis.ingresados)} detalle={`Cohorte ${cohorte} — universo oficial (canon, sin staff ni pruebas)`} />
-                <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * (kpis.activos ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} detalle="culminantes ÷ ingresados (canon)" acento={C.verde} />
-                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * (kpis.retirados ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} detalle="retirados ÷ ingresados (canon)" acento={C.rojo} />
+                <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * (kpis.activos ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.verde} />
+                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * (kpis.retirados ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.rojo} />
                 <Kpi titulo="Culminantes" valor={kpis.activos != null ? String(kpis.activos) : '—'} detalle="terminaron el programa (canon)" />
                 <Kpi titulo="Retirados" valor={kpis.retirados != null ? String(kpis.retirados) : '—'} detalle="se retiraron (canon)" />
                 <Kpi titulo="Cursos" valor={String(cursosProg.length)} detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${cohorte}`} />
@@ -1117,7 +1117,7 @@ export default function Pagina() {
                     : estado === 'retirados'
                       ? `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canon oficial)`
                       : kpis.usarActualesSeguimiento
-                        ? `Actuales en Seguimiento — suma exacta por ciudad. La cohorte canónica Q10 cuenta ${kpis.activos}; la diferencia son retiros por confirmar.`
+                        ? undefined
                         : `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canon oficial)`
                 }
               />
@@ -1143,16 +1143,16 @@ export default function Pagina() {
                 MISMAS casillas pero de esa ciudad (v_pub_retencion_ciudad), pedido de Samuel. */}
             {kpis.ingresados != null && kpis.activos != null && kpis.retirados != null ? (
               <>
-                <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * kpis.activos) / kpis.ingresados).toFixed(1)}%` : '—'} detalle={`${kpis.activos} activos ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.verde} />
-                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * kpis.retirados) / kpis.ingresados).toFixed(1)}%` : '—'} detalle={`${kpis.retirados} retirados ÷ ${kpis.ingresados} ingresados (canon)`} acento={C.rojo} />
+                <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * kpis.activos) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.verde} />
+                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * kpis.retirados) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.rojo} />
               </>
             ) : ciudadElegida && retencionPorCiudad.mapa.get(ciudadElegida) ? (() => {
               const rc = retencionPorCiudad.mapa.get(ciudadElegida)!;
               const ciu = ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida;
               return (
                 <>
-                  <Kpi titulo={`Retención · ${ciu}`} valor={`${rc.pct.toFixed(1)}%`} detalle={`${rc.activos} activos ÷ ${rc.ingresados} ingresados`} acento={C.verde} />
-                  <Kpi titulo={`Deserción · ${ciu}`} valor={`${((100 * rc.retirados) / rc.ingresados).toFixed(1)}%`} detalle={`${rc.retirados} retirados ÷ ${rc.ingresados} ingresados`} acento={C.rojo} />
+                  <Kpi titulo={`Retención · ${ciu}`} valor={`${rc.pct.toFixed(1)}%`} acento={C.verde} />
+                  <Kpi titulo={`Deserción · ${ciu}`} valor={`${((100 * rc.retirados) / rc.ingresados).toFixed(1)}%`} acento={C.rojo} />
                 </>
               );
             })() : null}
@@ -1427,8 +1427,8 @@ export default function Pagina() {
             {ciudadDisponible ? (
               <>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-                  <Kpi titulo="Retención (cohorte)" valor={`${retGlobal.toFixed(1)}%`} detalle={`${totalAct} activos ÷ ${totalIng} ingresados`} acento={C.verde} />
-                  <Kpi titulo="Deserción (cohorte)" valor={`${(100 - retGlobal).toFixed(1)}%`} detalle={`${totalIng - totalAct} retirados`} acento={C.rojo} />
+                  <Kpi titulo="Retención (cohorte)" valor={`${retGlobal.toFixed(1)}%`} acento={C.verde} />
+                  <Kpi titulo="Deserción (cohorte)" valor={`${(100 - retGlobal).toFixed(1)}%`} acento={C.rojo} />
                   <Kpi titulo="Mejor ciudad" valor={`${mejor.retencion.toFixed(1)}%`} detalle={`${mejor.etiqueta} — la que más retiene`} acento={C.verde} />
                   <Kpi titulo="Ciudad a intervenir" valor={`${peor.retencion.toFixed(1)}%`} detalle={`${peor.etiqueta} — la más baja`} acento={C.rojo} />
                 </div>
