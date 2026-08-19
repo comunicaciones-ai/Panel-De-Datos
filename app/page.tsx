@@ -763,8 +763,10 @@ export default function Pagina() {
     // ciudad y que la pestaña Seguimiento de monitorías (v_pub_geografia ≈ en_seguimiento_jc=true y
     // no retirado). Así el titular suma EXACTO con las ciudades e iguala a panel_control_gui, que
     // usa esa única fuente. La cohorte canónica de Q10 (cohorte_ingresos.activos) queda como base de
-    // aprobación en su propia sección; la diferencia (~4) son retiros por confirmar (ver "Retiro
-    // probable"). MR y cohortes históricas siguen con el número canónico (no tienen fuente Seguimiento).
+    // aprobación en su propia sección; la diferencia entre ambas fuentes son retiros por confirmar
+    // (NO fijar un número de ejemplo aquí — cambia con cada sync; se ve en vivo comparando el KPI
+    // "Actuales" con la pestaña Retención). MR y cohortes históricas siguen con el número canónico
+    // (no tienen fuente Seguimiento).
     const actualesGeo = datos.geografiaMunicipio
       .filter((g) => g.programa === programa && g.cohorte === cohorte)
       .reduce((s, g) => s + (g.personas ?? 0), 0);
