@@ -483,11 +483,17 @@ export interface PubSeguimiento {
 // titular. `ambito` distingue 'nacional' (SIN ciudad_norm, casi sin supresión — usar SIEMPRE
 // esto para el KPI titular, mismo patrón que PubSeguimiento) de 'ciudad' (con ciudad_norm,
 // para filtrar una ciudad específica — ahí sí es esperable algo de supresión).
+// Excepción 2026-08-27 (migración 058): en ambito='nacional', anio_registro='sin dato' NO se
+// divide por con_q10 (con_q10 sale null en esa fila) -- eran 19 personas partidas en 4+15, la
+// mitad de 4 quedaba bajo el umbral k-anonimato y se perdía. Fusionadas a propósito: se puede
+// mostrar el total (19, seguro) pero no decir cuántas de esas 19 tienen Q10 sin arriesgar la
+// celda chica. con_q10=null → sumar SIEMPRE al total, NUNCA a conQ10 ni a sinQ10 (ojo: `!null`
+// es `true` en JS — hay que comparar `=== true` / `=== false` explícito, no negar directo).
 export interface PubMrUniverso {
   ambito: 'nacional' | 'ciudad';
   anio_registro: string; // año de fecha_creacion (postulantes_mr), o 'sin dato'
   ciudad_norm: string | null; // null cuando ambito='nacional'
-  con_q10: boolean;
+  con_q10: boolean | null; // null = "sin dato" de año, no distinguido a propósito (ver arriba)
   total: number | null; // null = supresión k-anonimato (n<5)
 }
 

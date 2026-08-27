@@ -465,6 +465,10 @@ export default function Pagina() {
   // ya usado por PubSeguimiento ("para el KPI de contraste usar SIEMPRE ambito='nacional'").
   // Con ciudad elegida sí se usa ambito='ciudad' — ahí la supresión es esperable, es detalle
   // geográfico, no el titular.
+  // Excepción 2026-08-27 (migración 058): anio_registro='sin dato' viene con con_q10=null (19
+  // personas fusionadas, ver comentario en lib/api.ts) -- suman al total pero NUNCA a Con Q10
+  // ni a Sin Q10 (comparación estricta `=== true`/`=== false`; OJO, `!null` es `true` en JS,
+  // así que `!d.con_q10` habría sumado esas 19 a "Sin Q10" por error).
   const mrUniversoResumen = useMemo(() => {
     if (!datos || programa !== 'mr') return null;
     const filas = ciudadElegida
@@ -474,8 +478,9 @@ export default function Pagina() {
       filas.filter(pred).reduce((acc, d) => acc + (d.total ?? 0), 0);
     return {
       total: sumar(() => true),
-      conQ10: sumar((d) => d.con_q10),
-      sinQ10: sumar((d) => !d.con_q10),
+      conQ10: sumar((d) => d.con_q10 === true),
+      sinQ10: sumar((d) => d.con_q10 === false),
+      sinDatoQ10: sumar((d) => d.con_q10 === null),
       hayDatos: filas.length > 0,
     };
   }, [datos, programa, ciudadElegida]);
@@ -1375,11 +1380,18 @@ export default function Pagina() {
               }
             >
               {mrUniversoResumen.hayDatos ? (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <Kpi titulo="Universo total" valor={mrUniversoResumen.total.toLocaleString('es-CO')} detalle="Con y sin matrícula Q10" />
-                  <Kpi titulo="Con Q10" valor={mrUniversoResumen.conQ10.toLocaleString('es-CO')} detalle="Matricularon en un curso" acento={C.verde} />
-                  <Kpi titulo="Sin Q10" valor={mrUniversoResumen.sinQ10.toLocaleString('es-CO')} detalle="Solo candidatas/postulantes, aún cuentan" acento={C.naranja} />
-                </div>
+                <>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    <Kpi titulo="Universo total" valor={mrUniversoResumen.total.toLocaleString('es-CO')} detalle="Con y sin matrícula Q10" />
+                    <Kpi titulo="Con Q10" valor={mrUniversoResumen.conQ10.toLocaleString('es-CO')} detalle="Matricularon en un curso" acento={C.verde} />
+                    <Kpi titulo="Sin Q10" valor={mrUniversoResumen.sinQ10.toLocaleString('es-CO')} detalle="Solo candidatas/postulantes, aún cuentan" acento={C.naranja} />
+                  </div>
+                  {mrUniversoResumen.sinDatoQ10 > 0 && (
+                    <p className="text-xs text-slate-400 mt-3">
+                      +{mrUniversoResumen.sinDatoQ10.toLocaleString('es-CO')} más sin fecha de registro identificable — cuentan en el total, pero no se muestra si tienen Q10 o no (grupo muy chico para desglosar sin arriesgar privacidad).
+                    </p>
+                  )}
+                </>
               ) : (
                 <EnConstruccion detalle="Esta vista requiere v_pub_mr_universo (migración 054), propuesta pero aún no aplicada en la base de datos." />
               )}
