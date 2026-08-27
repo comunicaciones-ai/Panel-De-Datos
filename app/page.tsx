@@ -91,6 +91,11 @@ const COLOR_GENERO: Record<string, string> = {
 // incompleto"). Nunca editar a mano sin volver a esa fuente.
 //
 // Semántica de cada campo (aclarada por Samuel, 2026-08-27):
+//   bd          = BD total de ese año — OJO, es ACUMULATIVO (total de mujeres registradas
+//                 hasta ese año, no las nuevas de ese año). El total real del universo es el
+//                 del año MÁS RECIENTE (2026), nunca la suma de los 5 años (sumarlos infla el
+//                 número varias veces, ver bug corregido 2026-08-27 en VistaUniversoMr: para
+//                 "Todos" el KPI usa bd del último año, no Σbd).
 //   inscritas  = veces que se inscribieron al curso (una mujer puede reinscribirse varias
 //                veces al mismo curso a lo largo del año, no es headcount de personas único)
 //   iniciados  = de esas inscripciones, cuántas SÍ entraron a la plataforma Q10 (equivalente
@@ -98,6 +103,10 @@ const COLOR_GENERO: Record<string, string> = {
 //                cuentan como "0 cursos" / nunca empezaron)
 //   completados = culminantes reales del curso
 //   "Asistentes" (columna del Excel) se descarta a propósito — no se usa acá.
+//
+// Corrección 2026-08-27 (mismo día, más tarde): bd de 2026 baja de 5110 a 5109 -- Samuel
+// confirmó la baja de una participante el mismo día, ver
+// docs/procesos/postulantes-mr-supabase.md en admin-usable, sección "Remoción puntual".
 type CursoHistoricoMr = { nombre: string; inscritas: number | null; iniciados: number | null; completados: number | null };
 type AnioHistoricoMr = { anio: string; bd: number; cursos: CursoHistoricoMr[] };
 const HISTORICO_Q10_MR: AnioHistoricoMr[] = [
@@ -136,7 +145,7 @@ const HISTORICO_Q10_MR: AnioHistoricoMr[] = [
     ],
   },
   {
-    anio: '2026', bd: 5110, cursos: [
+    anio: '2026', bd: 5109, cursos: [
       { nombre: 'Habilidades Clave para Emprender con Propósito', inscritas: 246, iniciados: 86, completados: 67 },
       { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 133, iniciados: 88, completados: 46 },
       { nombre: 'Finanzas inteligentes, gestión para emprendedoras', inscritas: 179, iniciados: 56, completados: 44 },
@@ -183,6 +192,52 @@ function Kpi({ titulo, valor, detalle, acento }: { titulo: string; valor: string
       <p className="text-2xl font-bold kpi-valor mt-1" style={acento ? { color: acento } : undefined}>{valor}</p>
       {detalle && <p className="text-xs text-slate-400 mt-1">{detalle}</p>}
     </motion.div>
+  );
+}
+
+// Embudo Formación MR (pedido 2026-08-27): "0 cursos" aparte + una barra ancha = inscritos,
+// con una barra azul MÁS ANGOSTA adentro = las que sí entraron a Q10 (iniciados), y dentro de
+// esa una verde = las que aprobaron (completados). Mismo patrón visual pedido por Samuel:
+// "bienvenida barra grande inscritos, barra azul dentro de la grande es la gente de Q10 y
+// finalmente los aprobados". Todo a nivel de inscripción-instancia (no headcount único, igual
+// que el resto de HISTORICO_Q10_MR) salvo `ceroCursos`, que sí usa el BD real (headcount).
+function EmbudoFormacionMr(
+  { titulo, ceroCursos, inscritos, iniciados, aprobados }:
+  { titulo: string; ceroCursos: number; inscritos: number; iniciados: number; aprobados: number },
+) {
+  const pctIniciados = inscritos ? Math.min(100, (100 * iniciados) / inscritos) : 0;
+  const pctAprobados = inscritos ? Math.min(100, (100 * aprobados) / inscritos) : 0;
+  return (
+    <div className="tarjeta-glass p-3">
+      <p className="text-xs font-bold text-slate-600 mb-2">{titulo}</p>
+      <div className="grid grid-cols-2 gap-2 mb-3">
+        <div className="rounded-lg border border-slate-200/70 bg-white/40 p-2">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">0 cursos</p>
+          <p className="text-lg font-bold kpi-valor" style={{ color: C.rojo }}>{ceroCursos.toLocaleString('es-CO')}</p>
+          <p className="text-[10px] text-slate-400">Nunca llegaron a Bienvenida</p>
+        </div>
+        <div className="rounded-lg border border-slate-200/70 bg-white/40 p-2">
+          <p className="text-[10px] uppercase tracking-wide text-slate-400">Aprobados</p>
+          <p className="text-lg font-bold kpi-valor" style={{ color: C.verde }}>{aprobados.toLocaleString('es-CO')}</p>
+          <p className="text-[10px] text-slate-400">{pctAprobados.toFixed(1)}% de inscritos</p>
+        </div>
+      </div>
+      <div className="relative h-8 w-full rounded-lg overflow-hidden" style={{ background: `${C.naranja}30` }}>
+        <div
+          className="absolute inset-y-0 left-0 rounded-lg transition-all"
+          style={{ width: `${pctIniciados}%`, background: C.azul2 }}
+        />
+        <div
+          className="absolute inset-y-0 left-0 rounded-lg transition-all"
+          style={{ width: `${pctAprobados}%`, background: C.verde }}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[11px] text-slate-500">
+        <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: `${C.naranja}90` }} />Inscritos {inscritos.toLocaleString('es-CO')}</span>
+        <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: C.azul2 }} />Entraron a Q10 {iniciados.toLocaleString('es-CO')} ({pctIniciados.toFixed(1)}%)</span>
+        <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: C.verde }} />Aprobaron {aprobados.toLocaleString('es-CO')} ({pctAprobados.toFixed(1)}%)</span>
+      </div>
+    </div>
   );
 }
 
@@ -1350,15 +1405,24 @@ export default function Pagina() {
             se acerca con bd - Σiniciados, marcado explícitamente como aproximación (piso, no
             exacto) porque "iniciados" es a nivel de inscripción-curso, no de persona única. */}
         {(() => {
-          const sumIniciados = (cursos: CursoHistoricoMr[]) =>
-            cursos.reduce((s, c) => s + (c.iniciados ?? 0), 0);
+          const suma = (cursos: CursoHistoricoMr[], campo: 'inscritas' | 'iniciados' | 'completados') =>
+            cursos.reduce((s, c) => s + (c[campo] ?? 0), 0);
           const anioSel = anioUniversoMr === 'todos' ? null : HISTORICO_Q10_MR.find((a) => a.anio === anioUniversoMr) ?? null;
-          const bd = anioSel ? anioSel.bd : HISTORICO_Q10_MR.reduce((s, a) => s + a.bd, 0);
+          // BD es ACUMULATIVO por año (ver comentario junto a HISTORICO_Q10_MR) -- para
+          // "Todos" el total real es el del año MÁS RECIENTE (2026 → 5.109), NUNCA la suma de
+          // los 5 años (eso lo infla ~3.5x, bug corregido 2026-08-27 mismo día). Inscritos/
+          // iniciados/completados sí se suman entre años -- son actividad de curso, no BD.
+          const bd = anioSel ? anioSel.bd : HISTORICO_Q10_MR[HISTORICO_Q10_MR.length - 1].bd;
+          const inscritosTotales = anioSel
+            ? suma(anioSel.cursos, 'inscritas')
+            : HISTORICO_Q10_MR.reduce((s, a) => s + suma(a.cursos, 'inscritas'), 0);
           const iniciadosTotales = anioSel
-            ? sumIniciados(anioSel.cursos)
-            : HISTORICO_Q10_MR.reduce((s, a) => s + sumIniciados(a.cursos), 0);
+            ? suma(anioSel.cursos, 'iniciados')
+            : HISTORICO_Q10_MR.reduce((s, a) => s + suma(a.cursos, 'iniciados'), 0);
+          const aprobadosTotales = anioSel
+            ? suma(anioSel.cursos, 'completados')
+            : HISTORICO_Q10_MR.reduce((s, a) => s + suma(a.cursos, 'completados'), 0);
           const nuncaBienvenida = Math.max(0, bd - iniciadosTotales);
-          const pctNuncaBienvenida = bd ? Math.round((1000 * nuncaBienvenida) / bd) / 10 : 0;
           return (
             <Seccion
               titulo="Formación — cursos MR por año (foto fija, no en vivo)"
@@ -1382,13 +1446,22 @@ export default function Pagina() {
                   </button>
                 ))}
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
-                <Kpi titulo={anioSel ? `BD total ${anioSel.anio}` : 'BD total (2022-2026)'} valor={bd.toLocaleString('es-CO')} detalle="Registradas ese período" />
-                <Kpi titulo="Nunca llegaron a Bienvenida" valor={nuncaBienvenida.toLocaleString('es-CO')} detalle={`~${pctNuncaBienvenida}% · 0 cursos real, aprox.`} acento={C.naranja} />
-                <Kpi titulo="Sí entraron a la plataforma" valor={iniciadosTotales.toLocaleString('es-CO')} detalle={`~${(100 - pctNuncaBienvenida).toFixed(1)}%, aprox.`} acento={C.verde} />
+              <Kpi
+                titulo={anioSel ? `BD total ${anioSel.anio}` : 'BD total — análisis TODOS (2022-2026)'}
+                valor={bd.toLocaleString('es-CO')}
+                detalle={anioSel ? 'Registradas hasta ese año (acumulado)' : 'Universo real de Mujeres ROFÉ, año más reciente'}
+              />
+              <div className="mt-3 mb-4">
+                <EmbudoFormacionMr
+                  titulo={anioSel ? `Embudo ${anioSel.anio}` : 'Embudo — todos los años juntos'}
+                  ceroCursos={nuncaBienvenida}
+                  inscritos={inscritosTotales}
+                  iniciados={iniciadosTotales}
+                  aprobados={aprobadosTotales}
+                />
               </div>
               <p className="text-[11px] text-slate-400 mb-4">
-                Aproximado: "iniciados" es a nivel de inscripción por curso (si una mujer empezó 2 cursos, resta 2 veces) — este número es un PISO del real "nunca entraron a nada". No hay dato de persona única antes de 2027.
+                "0 cursos" (nunca llegaron a Bienvenida) = BD − Σiniciados, aproximado (piso): "iniciados" es a nivel de inscripción por curso (si una mujer empezó 2 cursos, resta 2 veces), no hay dato de persona única antes de 2027. El resto del embudo (inscritos/Q10/aprobados) también es a nivel de inscripción-curso, no headcount único.
               </p>
               {!anioSel ? (
                 <NoAplica motivo='el detalle por curso solo se ve un año a la vez — los cursos cambian de nombre cada año. Elige un año en el header de arriba.' suave />
