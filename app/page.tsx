@@ -1565,6 +1565,23 @@ export default function Pagina() {
                 nota="Retención = culminantes ÷ ingresados (canon oficial). Cifra exacta para todos los años — el mismo dato del Resumen."
               >
                 <GraficoBarras datos={hist} dataKey="retencion" nombre="Retención %" color={C.verde} dominioMax={100} sufijoEtiqueta="%" decimalesEtiqueta={1} />
+                {/* Culminación (=Retención) vs Deserción en el mismo eje temporal — cierra el
+                    hallazgo de comparar contra el Power BI externo de tocaunavida.org/reportes-jc
+                    ("Participantes, % Deserción y % Culminación por Año"): mismo dato que ya
+                    teníamos en `hist` (Retención/Deserción por cohorte), solo faltaba esta segunda
+                    línea junto a la barra de arriba. Reusa GraficoHistorial (pivote curso→línea)
+                    sin tocar backend. 2026-08-27. */}
+                <div className="mt-4">
+                  <p className="text-xs text-slate-400 mb-1">Culminación vs. deserción, año a año (mismos datos de la tabla de abajo).</p>
+                  <GraficoHistorial
+                    historial={hist.flatMap((h) => [
+                      { fecha: h.cohorte, curso: 'Culminación %', valor: h.retencion },
+                      { fecha: h.cohorte, curso: 'Deserción %', valor: h.desercion },
+                    ])}
+                    metrica="pct"
+                    nombreMetrica="%"
+                  />
+                </div>
                 <div className="overflow-x-auto mt-3">
                   <table className="w-full text-sm">
                     <thead>
