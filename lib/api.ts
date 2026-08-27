@@ -447,6 +447,20 @@ export interface PubSeguimiento {
   total: number | null;
 }
 
+// v_pub_mr_universo (migración 054, propuesta 2026-08-26): agregado público del UNIVERSO
+// COMPLETO de Mujeres ROFÉ (postulantes_mr: General+Inactivas+Plataforma MR+Cursos+Cursos%,
+// TODAS, con y sin Q10) — equivalente público de la pestaña "👩 Mujeres ROFÉ" del panel de
+// control local. NO discrimina por Q10 (pedido explícito): con_q10=false es la mayoría
+// esperada (~89%), no un error — mostrarlo siempre al lado de con_q10=true, nunca solo.
+// leerSeguro porque, como retencionCiudad/impactoFinancieroMr, la vista puede no existir
+// aún si el frontend se despliega antes de aplicar la migración.
+export interface PubMrUniverso {
+  anio_registro: string; // año de fecha_creacion (postulantes_mr), o 'sin dato'
+  ciudad_norm: string;
+  con_q10: boolean;
+  total: number | null; // null = supresión k-anonimato (n<5)
+}
+
 // v_pub_retencion_ciudad (migración 046): retención por grupo_ciudad para la cohorte, agregada y
 // k-anon (supresión si ingresados<5). activos = personas activas por ciudad (Seguimiento en la
 // cohorte viva); retirados = retiros de esa cohorte cuyo participante tiene esa ciudad. Suman al
@@ -514,6 +528,9 @@ export interface Datos {
   // Impacto financiero MR (Fase 2 ampliación, migración 046, 2026-08-15). leerSeguro por el
   // mismo motivo que retencionCiudad: si el frontend se despliega antes que la vista, no rompe.
   impactoFinancieroMr: PubImpactoFinancieroMr[];
+  // Universo completo MR sin discriminar Q10 (v_pub_mr_universo, migración 054). leerSeguro
+  // por el mismo motivo que retencionCiudad — vacío hasta que se aplique la vista.
+  mrUniverso: PubMrUniverso[];
   // v_pub_cohorte: canon oficial por cohorte (ingresados/activos/retirados/pct_aprobados).
   // Cerradas 2019–2025 desde cohorte_historico (culminantes+retirados=seleccionados); viva 2026
   // desde en_seguimiento_jc. Es la ÚNICA fuente con todos los años — cohorte_ingresos solo tiene
@@ -538,7 +555,7 @@ export interface Datos {
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -583,8 +600,9 @@ export async function cargarTodo(): Promise<Datos> {
       leer<CohorteIngresos>('v_pub_cohorte'),
       leerSeguro<RetencionCiudad>('v_pub_retencion_ciudad'),
       leerSeguro<PubImpactoFinancieroMr>('v_pub_impacto_financiero_mr'),
+      leerSeguro<PubMrUniverso>('v_pub_mr_universo'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {

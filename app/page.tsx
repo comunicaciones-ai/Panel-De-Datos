@@ -6,6 +6,7 @@ import {
   Datos,
   PubDemografia,
   PubEmprendimiento,
+  PubMrUniverso,
   ETIQUETA_GRUPO,
   ETIQUETA_MR,
   ETIQUETA_SITUACION,
@@ -438,6 +439,27 @@ export default function Pagina() {
         (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
     );
   }, [datos, cohorte, estado, ciudadElegida]);
+
+  // Universo completo MR sin discriminar Q10 (v_pub_mr_universo, migración 054, pedido
+  // 2026-08-26 "no discriminar por Q10"). A diferencia del resto de este tab, NO se filtra
+  // por cohorte/estado — MR no se organiza por cohortes de selección anual como JC (ver
+  // docs/procesos/plan-seguimiento-mr-2026-08-25.md §1), solo por ciudad si hay una elegida.
+  // Sumar `total` con supresión n<5 subcuenta un poco frente al real sin desglosar — mismo
+  // trade-off ya aceptado en impactoFinancieroMrFiltrada arriba.
+  const mrUniversoResumen = useMemo(() => {
+    if (!datos || programa !== 'mr') return null;
+    const filas = ciudadElegida
+      ? datos.mrUniverso.filter((d) => d.ciudad_norm === ciudadElegida)
+      : datos.mrUniverso;
+    const sumar = (pred: (d: PubMrUniverso) => boolean) =>
+      filas.filter(pred).reduce((acc, d) => acc + (d.total ?? 0), 0);
+    return {
+      total: sumar(() => true),
+      conQ10: sumar((d) => d.con_q10),
+      sinQ10: sumar((d) => !d.con_q10),
+      hayDatos: filas.length > 0,
+    };
+  }, [datos, programa, ciudadElegida]);
 
   const pubAsistenciaFiltrada = useMemo(() => {
     if (!datos) return [];
@@ -1183,6 +1205,31 @@ export default function Pagina() {
               </>
             )}
           </div>
+          {/* Universo completo de Mujeres ROFÉ, SIN discriminar por Q10 (v_pub_mr_universo,
+              migración 054) — pedido explícito 2026-08-26, equivalente público de la pestaña
+              "👩 Mujeres ROFÉ" del panel de control local. Todo lo de arriba en este tab
+              (Ingresados/Retención/Matrículas...) es cohorte-curso Q10, que solo ve ~11% de
+              las mujeres reales — esta caja muestra las ~5.3k. */}
+          {programa === 'mr' && mrUniversoResumen && (
+            <Seccion
+              titulo="Universo de Mujeres ROFÉ (con y sin Q10)"
+              nota={
+                ciudadElegida
+                  ? `Solo ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}. Incluye TODAS las mujeres registradas en la base (postulantes y matriculadas), no solo las que tienen curso en Q10 — por eso "Sin Q10" suele ser la mayoría, no un error.`
+                  : 'Incluye TODAS las mujeres registradas en la base (postulantes y matriculadas), no solo las que tienen curso en Q10 — por eso "Sin Q10" suele ser la mayoría, no un error.'
+              }
+            >
+              {mrUniversoResumen.hayDatos ? (
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <Kpi titulo="Universo total" valor={mrUniversoResumen.total.toLocaleString('es-CO')} detalle="Con y sin matrícula Q10" />
+                  <Kpi titulo="Con Q10" valor={mrUniversoResumen.conQ10.toLocaleString('es-CO')} detalle="Matricularon en un curso" acento={C.verde} />
+                  <Kpi titulo="Sin Q10" valor={mrUniversoResumen.sinQ10.toLocaleString('es-CO')} detalle="Solo candidatas/postulantes, aún cuentan" acento={C.naranja} />
+                </div>
+              ) : (
+                <EnConstruccion detalle="Esta vista requiere v_pub_mr_universo (migración 054), propuesta pero aún no aplicada en la base de datos." />
+              )}
+            </Seccion>
+          )}
           {kpis.esCanonico && kpis.estadoCohorte && (
             <Seccion
               titulo="Estado de la cohorte"
