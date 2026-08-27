@@ -186,6 +186,29 @@ export interface AprobacionCurso {
   finalizado: boolean | null;
 }
 
+// v_pub_aprobacion_ciudad_jc (migración 2026-08-26, auditoría panel-datos-etl.md): espejo de
+// aprobacion_cursos/v_aprobacion_cursos_jc_ajustado con grupo_ciudad — cierra el hueco de la
+// vista canónica (cohorte vigente) que no tenía cómo responder al filtro de Ciudad. Solo JC
+// (en_seguimiento_jc es un flag exclusivo de JC). k-anonimato: cursaron<5 -> toda la fila NULL
+// (celda suprimida, no se pierde la fila). leerSeguro porque es una vista nueva.
+export interface AprobacionCursoCiudad {
+  cohorte: string;
+  curso: string;
+  programa: 'jc';
+  grupo_ciudad: string;
+  cursaron: number | null;
+  activos: number | null;
+  aprobados: number | null;
+  aprobados_retirados: number | null;
+  retirados: number | null;
+  banda_0_25: number | null;
+  banda_26_80: number | null;
+  banda_81_100: number | null;
+  aprobados_total: number | null;
+  promedio: number | string | null;
+  pct_aprobados: number | string | null;
+}
+
 // v_retiro_probable_jc: personas con en_seguimiento_jc=false — no aparecen en la pestaña
 // Seguimiento del Sheet pero Q10 aún no las marca retiradas oficialmente. Alerta de retiro
 // PENDIENTE DE CONFIRMAR, complementaria a cohorte_ingresos.retirados (oficial), no lo
@@ -531,6 +554,9 @@ export interface Datos {
   // Universo completo MR sin discriminar Q10 (v_pub_mr_universo, migración 054). leerSeguro
   // por el mismo motivo que retencionCiudad — vacío hasta que se aplique la vista.
   mrUniverso: PubMrUniverso[];
+  // Aprobación canónica por ciudad, solo JC (v_pub_aprobacion_ciudad_jc, auditoría 2026-08-26).
+  // leerSeguro por el mismo motivo que retencionCiudad.
+  aprobacionCiudadJc: AprobacionCursoCiudad[];
   // v_pub_cohorte: canon oficial por cohorte (ingresados/activos/retirados/pct_aprobados).
   // Cerradas 2019–2025 desde cohorte_historico (culminantes+retirados=seleccionados); viva 2026
   // desde en_seguimiento_jc. Es la ÚNICA fuente con todos los años — cohorte_ingresos solo tiene
@@ -555,7 +581,7 @@ export interface Datos {
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -601,8 +627,9 @@ export async function cargarTodo(): Promise<Datos> {
       leerSeguro<RetencionCiudad>('v_pub_retencion_ciudad'),
       leerSeguro<PubImpactoFinancieroMr>('v_pub_impacto_financiero_mr'),
       leerSeguro<PubMrUniverso>('v_pub_mr_universo'),
+      leerSeguro<AprobacionCursoCiudad>('v_pub_aprobacion_ciudad_jc?order=cursaron.desc'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {

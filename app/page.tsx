@@ -668,6 +668,25 @@ export default function Pagina() {
   // veces, en Resumen y en Cursos, con riesgo de desalinearse). Se consume igual en ambos tabs.
   const mostrarCanonico = esActual && aprobacionProg.length > 0;
 
+  // Aprobación canónica por CIUDAD (v_pub_aprobacion_ciudad_jc, cerrado 2026-08-26): mismo
+  // shape que aprobacionProg (activos/aprobados/aprobados_retirados/retirados/cursaron), así
+  // que segmentosAprobacion/totalPorEstado/aprobadosPorEstado (definidos más abajo) sirven tal
+  // cual sobre esta fuente también. Solo JC — MR no tiene en_seguimiento_jc todavía.
+  const aprobacionCiudadProg = useMemo(
+    () =>
+      datos && ciudadElegida && programa === 'jc'
+        ? datos.aprobacionCiudadJc.filter((a) => a.cohorte === cohorte && a.grupo_ciudad === ciudadElegida)
+        : [],
+    [datos, programa, cohorte, ciudadElegida],
+  );
+  // Filas con celda suprimida por k-anonimato (cursaron<5 -> toda la fila null) — se muestran
+  // aparte para no mentir con un "0" donde en realidad es "dato oculto por privacidad".
+  const aprobacionCiudadSuprimida = aprobacionCiudadProg.filter((a) => a.cursaron == null);
+  const aprobacionCiudadConDato = aprobacionCiudadProg.filter(
+    (a): a is typeof a & { cursaron: number; activos: number; aprobados: number; aprobados_retirados: number; retirados: number } =>
+      a.cursaron != null,
+  );
+
 
   // Verificación cruzada: misma forma que aprobacion_cursos pero recalculada desde
   // enrollments + en_seguimiento_jc, para detectar si el pipeline oficial de Q10 se
@@ -709,7 +728,21 @@ export default function Pagina() {
   // Segmentos del gráfico de aprobación por curso, recortados al Estado elegido: Activos
   // (aprobó/en curso, denominador=activos), Retirados (aprobó-y-retiró/retirado,
   // denominador=retirados) o Todos (los 4 segmentos, como antes — denominador=cursaron).
-  const segmentosAprobacion = (a: (typeof aprobacionProg)[number]) => {
+  // Forma mínima compartida por aprobacionProg (nacional) y aprobacionCiudadConDato (por
+  // ciudad, JC): permite reusar los mismos helpers de abajo sobre cualquiera de las dos fuentes.
+  type FilaAprobacion = {
+    curso: string;
+    activos: number;
+    aprobados: number;
+    aprobados_retirados: number;
+    retirados: number;
+    cursaron: number;
+    banda_0_25: number | null;
+    banda_26_80: number | null;
+    aprobados_total: number | null;
+    promedio: number | string | null;
+  };
+  const segmentosAprobacion = (a: FilaAprobacion) => {
     if (estado === 'activos') {
       return {
         curso: a.curso,
@@ -741,9 +774,9 @@ export default function Pagina() {
   // aprobacion_cursos). El universo real de retirados evaluado en cada curso es
   // `retirados + aprobados_retirados`; usar solo `retirados` producía denominadores más chicos
   // que el numerador y KPIs de "Aprobación" imposibles (ej. 206%) en la pestaña Cursos.
-  const totalPorEstado = (a: (typeof aprobacionProg)[number]) =>
+  const totalPorEstado = (a: FilaAprobacion) =>
     estado === 'activos' ? a.activos : estado === 'retirados' ? a.retirados + a.aprobados_retirados : a.cursaron;
-  const aprobadosPorEstado = (a: (typeof aprobacionProg)[number]) =>
+  const aprobadosPorEstado = (a: FilaAprobacion) =>
     estado === 'activos' ? a.aprobados : estado === 'retirados' ? a.aprobados_retirados
       : (a.aprobados_total ?? a.aprobados + a.aprobados_retirados);
 
@@ -795,6 +828,21 @@ export default function Pagina() {
         enRiesgo: aprobacionProg.reduce((s, a) => s + (a.banda_0_25 ?? 0), 0),
         retiradas: aprobacionProg.reduce((s, a) => s + a.retirados, 0),
         total: matriculas,
+      };
+    }
+
+    // Mismo desglose que estadoCohorte pero por CIUDAD (v_pub_aprobacion_ciudad_jc, cerrado
+    // 2026-08-26) — reemplaza el "no aplica" que esta sección mostraba antes con Ciudad elegida.
+    // Solo JC (esa vista no existe para MR todavía).
+    let estadoCohorteCiudad: typeof estadoCohorte = null;
+    if (mostrarCanonico && hayFiltroCiudad && programa === 'jc' && aprobacionCiudadConDato.length > 0) {
+      const totalCiudad = aprobacionCiudadConDato.reduce((s, a) => s + a.cursaron, 0);
+      estadoCohorteCiudad = {
+        aprobadas: aprobacionCiudadConDato.reduce((s, a) => s + (a.aprobados_total ?? a.aprobados + a.aprobados_retirados), 0),
+        enProgreso: aprobacionCiudadConDato.reduce((s, a) => s + (a.banda_26_80 ?? 0), 0),
+        enRiesgo: aprobacionCiudadConDato.reduce((s, a) => s + (a.banda_0_25 ?? 0), 0),
+        retiradas: aprobacionCiudadConDato.reduce((s, a) => s + a.retirados, 0),
+        total: totalCiudad,
       };
     }
 
@@ -851,6 +899,7 @@ export default function Pagina() {
       esCanonico,
       numCursos: aprobacionProg.length,
       estadoCohorte,
+      estadoCohorteCiudad,
       estadoEst,
       edadProm,
       cifraEstado,
@@ -860,7 +909,7 @@ export default function Pagina() {
       activos: ing?.activos ?? null,
       retirados: ing?.retirados ?? null,
     };
-  }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, aprobacionProg, mostrarCanonico, ingresosProg]);
+  }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
 
   const cambiarPrograma = (p: Programa) => setPrograma(p);
   const cambiarCohorte = (coh: string) => setCohorteElegida(coh);
@@ -894,20 +943,20 @@ export default function Pagina() {
       </>
     );
 
-  // v_mr_demografia (formato largo, legacy) — solo se conserva para la tarjeta de
-  // "Emprendimiento" (booleano tiene_emprendimiento) dentro de Demografía MR: v_pub_demografia
-  // (037) no incluye esa dimensión (pertenece conceptualmente al tab Emprendimiento, que para
-  // MR no existe como encuesta detallada) — mezclar aquí la fuente vieja es deliberado y de
-  // bajo riesgo, documentado en plan-rediseno-panel-datos-2026-07-30.md Fase 3.
-  const totalMrConDatos = datos.mrDemografia
-    .filter((d) => d.dimension === 'emprendimiento')
-    .reduce((s, d) => s + d.total, 0);
-  const emprendimientoBooleanoMr = datos.mrDemografia
-    .filter((d) => d.dimension === 'emprendimiento')
+  // Emprendimiento MR — migrado 2026-08-26 de v_mr_demografia (legacy, sin cohorte/estado/
+  // ciudad) a v_pub_impacto_financiero_mr (dimension='tiene_emprendimiento'), la MISMA fuente
+  // ya usada por la tarjeta "Con emprendimiento" del tab Emprendimiento — ahora esta tarjeta de
+  // Demografía respeta cohorte/estado/ciudad como todas las demás de la grilla, sin necesitar
+  // una vista nueva (el dato ya existía, solo estaba en el tab equivocado).
+  const totalMrConDatos = impactoFinancieroMrFiltrada
+    .filter((d) => d.dimension === 'tiene_emprendimiento' && d.total != null)
+    .reduce((s, d) => s + (d.total as number), 0);
+  const emprendimientoBooleanoMr = impactoFinancieroMrFiltrada
+    .filter((d) => d.dimension === 'tiene_emprendimiento' && d.total != null)
     .map((d) => ({
-      nombre: ETIQUETA_MR[d.categoria] ?? d.categoria,
-      total: d.total,
-      color: d.categoria === 'con_emprendimiento' ? C.verde : C.amarillo,
+      nombre: d.categoria === 'si' ? 'Con emprendimiento' : 'Sin emprendimiento',
+      total: d.total as number,
+      color: d.categoria === 'si' ? C.verde : C.amarillo,
     }));
 
   const mapaEmprendimiento = agregarEmprendimiento(pubEmprendimientoFiltrada);
@@ -1274,12 +1323,34 @@ export default function Pagina() {
               )}
             </Seccion>
           )}
-          {mostrarCanonico && hayFiltroCiudad && (
+          {mostrarCanonico && hayFiltroCiudad && !kpis.estadoCohorteCiudad && (
             // BUG corregido 2026-08-26: esta sección desaparecía en silencio al elegir una
             // ciudad (aprobacion_cursos no trae grupo_ciudad) — violaba la regla propia del
-            // panel de nunca ocultar algo sin explicar por qué (ver NoAplica arriba).
+            // panel de nunca ocultar algo sin explicar por qué (ver NoAplica arriba). Para JC
+            // ahora hay datos reales (ver bloque de abajo, v_pub_aprobacion_ciudad_jc) — este
+            // aviso solo aparece cuando de verdad no hay fuente (MR, o ciudad sin datos suficientes).
             <Seccion titulo="Estado de la cohorte">
-              <NoAplica motivo="este desglose (aprobadas / en progreso / en riesgo / retiradas) sale de aprobacion_cursos, que no tiene desglose por ciudad. Quitá el filtro de ciudad para verlo — la tarjeta de esta ciudad más abajo sí sigue activa." suave />
+              <NoAplica
+                motivo={
+                  programa === 'mr'
+                    ? 'este desglose por ciudad todavía no existe para Mujeres ROFÉ.'
+                    : `sin datos suficientes de ${ETIQUETA_GRUPO[ciudadElegida ?? ''] ?? ciudadElegida} para este desglose (menos de 5 personas en cada curso — criterio de privacidad).`
+                }
+                suave
+              />
+            </Seccion>
+          )}
+          {kpis.estadoCohorteCiudad && (
+            <Seccion
+              titulo="Estado de la cohorte"
+              nota={`Desglose de las ${kpis.estadoCohorteCiudad.total.toLocaleString('es-CO')} matrículas de ${ETIQUETA_GRUPO[ciudadElegida ?? ''] ?? ciudadElegida} — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${cohorte}. Se aprueba con avance > 80%.`}
+            >
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <EstadoStat etiqueta="Aprobadas" valor={kpis.estadoCohorteCiudad.aprobadas} total={kpis.estadoCohorteCiudad.total} color={C.verde} detalle="avance > 80%" />
+                <EstadoStat etiqueta="En progreso" valor={kpis.estadoCohorteCiudad.enProgreso} total={kpis.estadoCohorteCiudad.total} color={C.amarillo} detalle="avance 26–80%" />
+                <EstadoStat etiqueta="En riesgo" valor={kpis.estadoCohorteCiudad.enRiesgo} total={kpis.estadoCohorteCiudad.total} color={C.naranja} detalle="avance 0–25%" />
+                <EstadoStat etiqueta="Retiradas sin aprobar" valor={kpis.estadoCohorteCiudad.retiradas} total={kpis.estadoCohorteCiudad.total} color={C.rojo} detalle="inhabilitadas < 80%" />
+              </div>
             </Seccion>
           )}
           {kpis.esCanonico && kpis.estadoCohorte && (
@@ -1576,9 +1647,31 @@ export default function Pagina() {
         );
       })()}
 
-      {tab === 'Cursos' && mostrarCanonico && (
+      {tab === 'Cursos' && mostrarCanonico && (() => {
+        // Ciudad + JC + cohorte vigente: usa v_pub_aprobacion_ciudad_jc (cerrado 2026-08-26,
+        // ver panel-datos-etl.md) en vez de caer a "no aplica" — MR y años cerrados siguen sin
+        // esta fuente, ahí sí queda el aviso.
+        const conCiudadJc = hayFiltroCiudad && programa === 'jc';
+        const filasCurso = conCiudadJc ? aprobacionCiudadConDato : aprobacionProg;
+        const ciu = ciudadElegida ? ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida : '';
+        return (
         <>
-          <NotaFiltros inaplicables={hayFiltroCiudad ? ['Ciudad (esta vista canónica es nacional; ver pestaña Resumen para el detalle por ciudad)'] : []} />
+          <NotaFiltros
+            inaplicables={
+              hayFiltroCiudad && programa === 'mr'
+                ? ['Ciudad (esta vista canónica de Mujeres ROFÉ todavía es nacional)']
+                : []
+            }
+          />
+          {conCiudadJc && aprobacionCiudadSuprimida.length > 0 && (
+            <p className="text-xs text-slate-400 mb-4">
+              {aprobacionCiudadSuprimida.length === 1 ? 'Un curso' : `${aprobacionCiudadSuprimida.length} cursos`} de {ciu} no se muestra{aprobacionCiudadSuprimida.length === 1 ? '' : 'n'} por tener menos de 5 personas (criterio de privacidad, mismo del resto del panel).
+            </p>
+          )}
+          {conCiudadJc && filasCurso.length === 0 ? (
+            <NoAplica motivo={`sin datos de ${ciu} suficientes para este desglose (menos de 5 personas en cada curso — criterio de privacidad).`} suave />
+          ) : (
+          <>
           <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4">
             <button
               onClick={() => setUnidadEstadoCohorte('matriculas')}
@@ -1590,7 +1683,7 @@ export default function Pagina() {
             >
               Por matrículas
             </button>
-            {estado === 'activos' && (
+            {estado === 'activos' && !conCiudadJc && (
               <button
                 onClick={() => setUnidadEstadoCohorte('estudiantes')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
@@ -1604,23 +1697,23 @@ export default function Pagina() {
             )}
           </div>
 
-          {unidadEstadoCohorte === 'matriculas' ? (
+          {unidadEstadoCohorte === 'matriculas' || conCiudadJc ? (
             <>
               {(() => {
                 // Header de diagnóstico. % de aprobación = aprobados÷cursaron AGREGADO (ratio pooled,
                 // NO promedio de tasas por curso — el escéptico del consejo advirtió que promediar
                 // cursos de tamaños dispares oculta el que colapsó). Además, el curso más crítico.
-                const cursaron = aprobacionProg.reduce((s, a) => s + totalPorEstado(a), 0);
-                const aprobaron = aprobacionProg.reduce((s, a) => s + aprobadosPorEstado(a), 0);
+                const cursaron = filasCurso.reduce((s, a) => s + totalPorEstado(a), 0);
+                const aprobaron = filasCurso.reduce((s, a) => s + aprobadosPorEstado(a), 0);
                 const pctAprob = cursaron ? Math.round((100 * aprobaron) / cursaron) : 0;
-                const conDato = aprobacionProg.filter((a) => totalPorEstado(a) > 0 && a.promedio != null);
+                const conDato = filasCurso.filter((a) => totalPorEstado(a) > 0 && a.promedio != null);
                 const critico = conDato.length
                   ? conDato.reduce((min, a) => (Number(a.promedio) < Number(min.promedio) ? a : min))
                   : null;
                 return (
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
                     <Kpi titulo="Aprobación" valor={`${pctAprob}%`} detalle={`${aprobaron.toLocaleString('es-CO')} de ${cursaron.toLocaleString('es-CO')} matrículas con avance > 80%`} />
-                    <Kpi titulo="Matrículas" valor={cursaron.toLocaleString('es-CO')} detalle={`en ${aprobacionProg.length} cursos · ${ETIQUETA_ESTADO[estado].toLowerCase()}`} />
+                    <Kpi titulo="Matrículas" valor={cursaron.toLocaleString('es-CO')} detalle={`en ${filasCurso.length} cursos · ${ETIQUETA_ESTADO[estado].toLowerCase()}${conCiudadJc ? ` · ${ciu}` : ''}`} />
                     {critico && (
                       <Kpi titulo="Curso más crítico" valor={`${critico.promedio}%`} detalle={`${critico.curso.length > 32 ? critico.curso.slice(0, 31) + '…' : critico.curso} — menor avance promedio` } />
                     )}
@@ -1628,12 +1721,12 @@ export default function Pagina() {
                 );
               })()}
               <Seccion
-                titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`}
+                titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}${conCiudadJc ? ` · ${ciu}` : ''}`}
                 nota="Cada barra suma la cohorte completa que cursó: aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro."
               >
-                <GraficoAprobacion datos={aprobacionProg.map(segmentosAprobacion)} />
+                <GraficoAprobacion datos={filasCurso.map(segmentosAprobacion)} />
               </Seccion>
-              <Seccion titulo={`Detalle por curso (${ETIQUETA_ESTADO[estado].toLowerCase()})`}>
+              <Seccion titulo={`Detalle por curso (${ETIQUETA_ESTADO[estado].toLowerCase()}${conCiudadJc ? ` · ${ciu}` : ''})`}>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -1645,7 +1738,7 @@ export default function Pagina() {
                       </tr>
                     </thead>
                     <tbody>
-                      {aprobacionProg.map((a) => {
+                      {filasCurso.map((a) => {
                         const total = totalPorEstado(a);
                         const aprobaron = aprobadosPorEstado(a);
                         return (
@@ -1692,8 +1785,11 @@ export default function Pagina() {
           ) : (
             <p className="text-sm text-slate-400">Sin datos por estudiante para esta cohorte.</p>
           )}
+          </>
+          )}
         </>
-      )}
+        );
+      })()}
 
       {tab === 'Cursos' && !mostrarCanonico && (
         <>
@@ -1958,9 +2054,13 @@ export default function Pagina() {
             {programa === 'mr' ? (
               <Seccion
                 titulo="Emprendimiento"
-                nota={`Con emprendimiento = registra un emprendimiento con nombre en la BD. ${totalMrConDatos} mujeres con dato — fuente legacy (v_mr_demografia): a diferencia de las demás tarjetas de este tab, NO respeta Cohorte, Estado ni Ciudad (siempre es el total histórico completo). Pendiente de migrar a v_pub_demografia.`}
+                nota={`Con emprendimiento = registra un emprendimiento con nombre en la BD. ${totalMrConDatos.toLocaleString('es-CO')} mujeres con dato para ${cohorte} · ${ETIQUETA_ESTADO[estado]}${ciudadElegida ? ` · ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : ''} (mismo criterio de "Con emprendimiento" del tab Emprendimiento).`}
               >
-                <GraficoEmprendimiento datos={emprendimientoBooleanoMr} />
+                {emprendimientoBooleanoMr.length > 0 ? (
+                  <GraficoEmprendimiento datos={emprendimientoBooleanoMr} />
+                ) : (
+                  <NoAplica motivo="sin datos para este filtro (cohorte/estado/ciudad elegidos)." suave />
+                )}
               </Seccion>
             ) : (
               <Seccion titulo="Emprendimiento">
