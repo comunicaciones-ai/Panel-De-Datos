@@ -81,6 +81,82 @@ const COLOR_GENERO: Record<string, string> = {
   Masculino: C.azul2,
 };
 
+// ── Histórico Q10 MR 2022-2026 — DATOS ESTÁTICOS, no vienen de Supabase ─────────────────
+// Fuente: informe oficial de Mujeres ROFÉ (Excel entregado por Samuel, 2026-08-27), tabla
+// "Comparativo". ADR del mismo día: seguimiento Q10 completo y auditado arranca en 2027;
+// para 2022-2026 no hay data ni auditoría del proceso, así que se congela como foto fija en
+// vez de intentar reconstruirlo con los datos parciales/desfasados que sí tenemos en
+// Supabase (`courses`/`enrollments` solo cubren 2025-2026 de forma incompleta, ver
+// docs/procesos/postulantes-mr-supabase.md en admin-usable — "Supabase MR histórico
+// incompleto"). Nunca editar a mano sin volver a esa fuente.
+//
+// Semántica de cada campo (aclarada por Samuel, 2026-08-27):
+//   inscritas  = veces que se inscribieron al curso (una mujer puede reinscribirse varias
+//                veces al mismo curso a lo largo del año, no es headcount de personas único)
+//   iniciados  = de esas inscripciones, cuántas SÍ entraron a la plataforma Q10 (equivalente
+//                a "llegó a Bienvenida" — las inscritas que nunca llegaron a esto son las que
+//                cuentan como "0 cursos" / nunca empezaron)
+//   completados = culminantes reales del curso
+//   "Asistentes" (columna del Excel) se descarta a propósito — no se usa acá.
+type CursoHistoricoMr = { nombre: string; inscritas: number | null; iniciados: number | null; completados: number | null };
+type AnioHistoricoMr = { anio: string; bd: number; cursos: CursoHistoricoMr[] };
+const HISTORICO_Q10_MR: AnioHistoricoMr[] = [
+  {
+    anio: '2022', bd: 704, cursos: [
+      { nombre: 'Habilidades Para Emprendedoras del Siglo XXI', inscritas: 121, iniciados: 24, completados: 4 },
+      { nombre: 'Emprendimiento', inscritas: 120, iniciados: 22, completados: 10 },
+      { nombre: 'Finanzas Para emprendedoras', inscritas: 111, iniciados: 9, completados: 9 },
+      { nombre: 'Impulsa tu Negocio en Plataformas Digitales', inscritas: 96, iniciados: 7, completados: 5 },
+      { nombre: 'Mindfulness', inscritas: 90, iniciados: 10, completados: 4 },
+    ],
+  },
+  {
+    anio: '2023', bd: 3311, cursos: [
+      { nombre: 'Habilidades para Emprendedoras del Siglo XXI', inscritas: 244, iniciados: 67, completados: 6 },
+      { nombre: 'Taller de Emprendimiento: Una Idea de Negocio', inscritas: 292, iniciados: 128, completados: 27 },
+      { nombre: 'Curso de Finanzas para Emprendedoras', inscritas: 298, iniciados: 76, completados: 22 },
+      { nombre: 'Impulsa tú Negocio en Plataformas Digitales', inscritas: 233, iniciados: 53, completados: 12 },
+    ],
+  },
+  {
+    anio: '2024', bd: 4322, cursos: [
+      { nombre: 'Habilidades del ser para Emprendedoras del Siglo 21', inscritas: 600, iniciados: 154, completados: 34 },
+      { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 416, iniciados: 148, completados: 41 },
+      { nombre: 'Finanzas inteligentes, gestión para emprendedoras', inscritas: 105, iniciados: 35, completados: 19 },
+      { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: 235, iniciados: 67, completados: 29 },
+    ],
+  },
+  {
+    anio: '2025', bd: 4712, cursos: [
+      { nombre: 'Habilidades del ser para Emprendedoras del Siglo 21', inscritas: 268, iniciados: 80, completados: 32 },
+      { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 334, iniciados: 84, completados: 34 },
+      { nombre: 'Finanzas inteligentes, gestión para emprendedoras', inscritas: 155, iniciados: 83, completados: 41 },
+      { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: 108, iniciados: 36, completados: 25 },
+      { nombre: 'Empoderamiento en Ventas: Lleva tu Negocio al Siguiente Nivel', inscritas: 182, iniciados: 68, completados: 60 },
+    ],
+  },
+  {
+    anio: '2026', bd: 5110, cursos: [
+      { nombre: 'Habilidades Clave para Emprender con Propósito', inscritas: 246, iniciados: 86, completados: 67 },
+      { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 133, iniciados: 88, completados: 46 },
+      { nombre: 'Finanzas inteligentes, gestión para emprendedoras', inscritas: 179, iniciados: 56, completados: 44 },
+      { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: null, iniciados: null, completados: null },
+      { nombre: 'Empoderamiento en Ventas: Lleva tu Negocio al Siguiente Nivel', inscritas: null, iniciados: null, completados: null },
+    ],
+  },
+];
+
+// ── Créditos — desembolso real, DATOS ESTÁTICOS ─────────────────────────────────────────
+// Cifras oficiales de finanzas (mensaje de Samuel, 2026-08-27) — distintas de "Acceso a
+// crédito" del tab Emprendimiento (esa cuenta personas en mr_microcreditos vinculadas a
+// postulantes_mr; esta es el desembolso real reportado por el equipo financiero, no
+// necesariamente calza persona a persona con lo que hay en Supabase hoy).
+type CreditoHistoricoMr = { tipo: string; anio: string; beneficiadas: number; continuan: number; pctContinuan: number; nuncaPagaron: number };
+const CREDITO_HISTORICO_MR: CreditoHistoricoMr[] = [
+  { tipo: 'Microcrédito', anio: '2025', beneficiadas: 38, continuan: 25, pctContinuan: 66, nuncaPagaron: 13 },
+  { tipo: 'iCredit', anio: '2024', beneficiadas: 25, continuan: 11, pctContinuan: 44, nuncaPagaron: 14 },
+];
+
 const MESES_ES = [
   'enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
   'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre',
@@ -241,6 +317,11 @@ export default function Pagina() {
   // ser lo primero que se ve. Solo aplica a MR — JC sigue siendo Q10 siempre (no tiene el
   // concepto de "universo sin Q10").
   const [mostrarQ10Mr, setMostrarQ10Mr] = useState(false);
+  // Año elegido dentro de "Histórico Q10 (2022-2026)" — foto estática, arranca en el año más
+  // reciente (2026). Toggle del bloque de créditos: total beneficiadas vs las que continúan
+  // (cumplieron/pagaron) — pedido 2026-08-27.
+  const [anioHistoricoMr, setAnioHistoricoMr] = useState('2026');
+  const [vistaCreditoMr, setVistaCreditoMr] = useState<'beneficiadas' | 'continuan'>('beneficiadas');
   // Unidad del desglose "Estado de la cohorte": matrículas (inscripciones) o estudiantes (personas).
   // Solo tiene sentido bajo Estado=Activos (v_cohorte_estudiantes* no distingue retirados).
   const [unidadEstadoCohorte, setUnidadEstadoCohorte] = useState<'matriculas' | 'estudiantes'>('matriculas');
@@ -1189,6 +1270,107 @@ export default function Pagina() {
             </Seccion>
           );
         })()}
+
+        {/* Histórico Q10 por año — ESTÁTICO (2026-08-27, ver HISTORICO_Q10_MR arriba). ADR
+            del mismo día: seguimiento Q10 completo y auditado arranca en 2027; 2022-2026
+            quedan congelados como foto fija del informe oficial, no se recalculan con
+            Supabase (que además tiene huecos reales para esos años). */}
+        <Seccion
+          titulo="Histórico Q10 por año (2022-2026) — foto fija, no en vivo"
+          nota={
+            `BD total ${anioHistoricoMr}: ${(HISTORICO_Q10_MR.find((a) => a.anio === anioHistoricoMr)?.bd ?? 0).toLocaleString('es-CO')}. ` +
+            '"Inscritas" = veces inscritas al curso (se pueden reinscribir varias veces, no es headcount único). "Sin iniciar" = se inscribió pero nunca entró a la plataforma Q10 (nunca llegó a Bienvenida). Dato oficial hasta 2026 — desde 2027 el seguimiento Q10 pasa a ser completo y auditado en vivo.'
+          }
+        >
+          <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4 flex-wrap">
+            {HISTORICO_Q10_MR.map((a) => (
+              <button
+                key={a.anio}
+                onClick={() => setAnioHistoricoMr(a.anio)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  anioHistoricoMr === a.anio ? 'pill-metal pill-metal-rosa' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {a.anio}
+              </button>
+            ))}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-slate-500 border-b border-slate-200">
+                  <th className="py-2 pr-4">Curso</th>
+                  <th className="py-2 pr-4 text-right">Inscritas</th>
+                  <th className="py-2 pr-4 text-right">Sin iniciar</th>
+                  <th className="py-2 text-right">Completaron</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(HISTORICO_Q10_MR.find((a) => a.anio === anioHistoricoMr)?.cursos ?? []).map((curso) => {
+                  const sinIniciar = curso.inscritas != null && curso.iniciados != null ? curso.inscritas - curso.iniciados : null;
+                  const pct = curso.iniciados && curso.completados != null ? Math.round((100 * curso.completados) / curso.iniciados) : null;
+                  return (
+                    <tr key={curso.nombre} className="border-b border-slate-100">
+                      <td className="py-2 pr-4">{curso.nombre}</td>
+                      <td className="py-2 pr-4 text-right">{curso.inscritas?.toLocaleString('es-CO') ?? '—'}</td>
+                      <td className="py-2 pr-4 text-right" style={{ color: sinIniciar ? C.naranja : undefined }}>
+                        {sinIniciar != null ? sinIniciar.toLocaleString('es-CO') : '—'}
+                      </td>
+                      <td className="py-2 text-right font-semibold" style={{ color: C.verde }}>
+                        {curso.completados != null ? `${curso.completados.toLocaleString('es-CO')}${pct != null ? ` (${pct}%)` : ''}` : 'Sin datos aún'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-slate-400 mt-2">
+            "Sin iniciar" suma por curso — si una mujer se inscribió en varios cursos del mismo año, puede contar más de una vez (mismo criterio que "Inscritas": es a nivel de matrícula, no de persona única).
+          </p>
+        </Seccion>
+
+        {/* Créditos — desembolso real, ESTÁTICO (2026-08-27, ver CREDITO_HISTORICO_MR
+            arriba). Cifras del equipo financiero, distintas de "Acceso a crédito" del tab
+            Emprendimiento (esa cuenta personas en Supabase; esta es el desembolso real
+            reportado, no necesariamente calza persona a persona con lo que hay cargado). */}
+        <Seccion
+          titulo="Créditos — desembolso real"
+          nota="Cifras oficiales del equipo financiero (2026-08-27). Distinto de 'Acceso a crédito' del tab Emprendimiento — ese cuenta personas ya cargadas en Supabase; esto es el desembolso real reportado."
+        >
+          <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4">
+            {([['beneficiadas', 'Total beneficiadas'], ['continuan', 'Chicas que continúan']] as const).map(([v, txt]) => (
+              <button
+                key={v}
+                onClick={() => setVistaCreditoMr(v)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                  vistaCreditoMr === v ? 'pill-metal pill-metal-rosa' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {txt}
+              </button>
+            ))}
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            {CREDITO_HISTORICO_MR.map((c) => (
+              <Kpi
+                key={c.tipo}
+                titulo={`${c.tipo} ${c.anio}`}
+                valor={
+                  vistaCreditoMr === 'beneficiadas'
+                    ? c.beneficiadas.toLocaleString('es-CO')
+                    : `${c.continuan.toLocaleString('es-CO')} (${c.pctContinuan}%)`
+                }
+                detalle={
+                  vistaCreditoMr === 'beneficiadas'
+                    ? 'Mujeres beneficiadas con el crédito'
+                    : `De ${c.beneficiadas} beneficiadas — ${c.nuncaPagaron} nunca pagaron`
+                }
+                acento={vistaCreditoMr === 'beneficiadas' ? C.azul3 : C.verde}
+              />
+            ))}
+          </div>
+        </Seccion>
       </>
     );
   }
