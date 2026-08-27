@@ -1036,6 +1036,62 @@ export default function Pagina() {
     );
   }
 
+  // Universo COMPLETO MR (v_pub_mr_demografia_universo, migración 056) — sin filtro de
+  // cohorte/estado/ciudad, "un solo grupo" (pedido explícito 2026-08-27). Mismo shape que
+  // PubDemografia, así que reusa ETIQUETA_MR/ORDEN_MR/GraficoBarras/GraficoEmprendimiento tal
+  // cual. Comparado contra el Power BI externo tocaunavida.org/reportes-mr.
+  const DIMENSIONES_UNIVERSO_MR = [
+    'tipo_vivienda', 'estrato', 'nivel_estudio', 'estado_civil', 'edad_rango',
+    'ingresos_familiares', 'tipo_credito',
+  ] as const;
+  const ETIQUETA_DIMENSION_UNIVERSO: Record<string, string> = {
+    tipo_vivienda: 'Tipo de vivienda',
+    estrato: 'Estrato socioeconómico',
+    nivel_estudio: 'Nivel de estudios',
+    estado_civil: 'Estado civil',
+    edad_rango: 'Distribución de edad',
+    ingresos_familiares: 'Ingresos familiares',
+    tipo_credito: 'Acceso a crédito (Microcrédito / iCredit)',
+  };
+  function TarjetaDemografiaUniverso({ dimension }: { dimension: (typeof DIMENSIONES_UNIVERSO_MR)[number] }) {
+    const mapa = new Map<string, number>();
+    for (const f of datos?.mrDemografiaUniverso ?? []) {
+      if (f.dimension === dimension && f.total != null) mapa.set(f.categoria, (mapa.get(f.categoria) ?? 0) + f.total);
+    }
+    if (mapa.size === 0) {
+      return (
+        <Seccion titulo={ETIQUETA_DIMENSION_UNIVERSO[dimension]}>
+          <NoAplica motivo="sin datos suficientes para esta dimensión (o vista aún no aplicada)." suave />
+        </Seccion>
+      );
+    }
+    if (dimension === 'estado_civil' || dimension === 'tipo_vivienda' || dimension === 'tipo_credito') {
+      const filas = Array.from(mapa.entries()).map(([categoria, total], i) => ({
+        nombre: ETIQUETA_MR[categoria] ?? categoria,
+        total,
+        color: [C.naranja, C.azul2, C.verde, C.amarillo, C.rojo][i % 5],
+      }));
+      return (
+        <Seccion titulo={ETIQUETA_DIMENSION_UNIVERSO[dimension]}>
+          <GraficoEmprendimiento datos={filas} />
+        </Seccion>
+      );
+    }
+    const orden = ORDEN_MR[dimension];
+    const filas = Array.from(mapa.entries())
+      .map(([categoria, total]) => ({
+        etiqueta: dimension === 'estrato' ? `Estrato ${categoria}` : (ETIQUETA_MR[categoria] ?? categoria),
+        total,
+        orden: categoria,
+      }))
+      .sort((a, b) => (orden ? orden.indexOf(a.orden) - orden.indexOf(b.orden) : b.total - a.total));
+    return (
+      <Seccion titulo={ETIQUETA_DIMENSION_UNIVERSO[dimension]} nota={dimension === 'edad_rango' ? 'En rangos — nunca edades individuales.' : undefined}>
+        <GraficoBarras datos={filas} dataKey="total" nombre="Personas" color={C.naranja} rotarEtiquetas={dimension === 'ingresos_familiares'} />
+      </Seccion>
+    );
+  }
+
   return (
     <>
       <Hero tema={programa} />
@@ -2085,6 +2141,58 @@ export default function Pagina() {
               </Seccion>
             )}
           </div>
+
+          {/* Universo COMPLETO de Mujeres ROFÉ, sin discriminar por Q10 (v_pub_mr_demografia_
+              universo + v_pub_mr_formacion_universo, migración 056) — pedido 2026-08-27 tras
+              comparar contra el Power BI externo tocaunavida.org/reportes-mr. Todo lo de arriba
+              en este tab es cohorte-curso Q10 (~11% de las mujeres reales); esta sección cubre
+              a las 5.111. Sin filtro de cohorte/estado/ciudad — "un solo grupo", como pidió
+              Samuel explícitamente. */}
+          {programa === 'mr' && (
+            <div className="mt-8">
+              <h2 className="font-bold text-lg text-slate-700 mb-1">Universo completo (con y sin Q10)</h2>
+              <p className="text-xs text-slate-400 mb-4">
+                Las 5.111 mujeres registradas en la base (fuente única válida: pestaña General del
+                Sheet BD-Mujeres ROFÉ), no solo el ~11% que matriculó en un curso Q10. Comparado
+                contra el reporte Power BI de Mujeres ROFÉ. Sin filtro de cohorte/estado/ciudad.
+              </p>
+              <div className="grid md:grid-cols-2 gap-6 mb-6">
+                {DIMENSIONES_UNIVERSO_MR.map((dim) => (
+                  <TarjetaDemografiaUniverso key={dim} dimension={dim} />
+                ))}
+              </div>
+              {(() => {
+                const filasForm = (datos?.mrFormacionUniverso ?? []).filter((f) => f.total != null) as
+                  { cursos_completados: string; total: number }[];
+                if (filasForm.length === 0) {
+                  return (
+                    <Seccion titulo="Formación (cursos completados)">
+                      <NoAplica motivo="sin datos suficientes (o vista aún no aplicada)." suave />
+                    </Seccion>
+                  );
+                }
+                const total = filasForm.reduce((s, f) => s + f.total, 0);
+                const sinCursos = filasForm.find((f) => f.cursos_completados === '0')?.total ?? 0;
+                const pctSinCursos = total ? Math.round((1000 * sinCursos) / total) / 10 : 0;
+                const filasBarra = filasForm
+                  .map((f) => ({ etiqueta: f.cursos_completados, total: f.total }))
+                  .sort((a, b) => (a.etiqueta === '5+' ? 1 : b.etiqueta === '5+' ? -1 : Number(a.etiqueta) - Number(b.etiqueta)));
+                return (
+                  <Seccion
+                    titulo="Formación — cursos MR completados"
+                    nota="De las 5.111, cuántas completaron 0, 1, 2... cursos en Q10, sumando todos los años juntos (no separado por cohorte)."
+                  >
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+                      <Kpi titulo="Mujeres con este dato" valor={total.toLocaleString('es-CO')} detalle="universo completo, 2026-08-27" />
+                      <Kpi titulo="Sin ningún curso completado" valor={sinCursos.toLocaleString('es-CO')} detalle={`${pctSinCursos}% del universo`} acento={C.naranja} />
+                      <Kpi titulo="Con al menos 1 curso" valor={(total - sinCursos).toLocaleString('es-CO')} detalle={`${(100 - pctSinCursos).toFixed(1)}% del universo`} acento={C.verde} />
+                    </div>
+                    <GraficoBarras datos={filasBarra} dataKey="total" nombre="Mujeres" color={C.azul2} etiquetaKey="etiqueta" />
+                  </Seccion>
+                );
+              })()}
+            </div>
+          )}
         </>
       ) : null}
 

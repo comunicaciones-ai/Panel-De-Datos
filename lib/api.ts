@@ -484,6 +484,28 @@ export interface PubMrUniverso {
   total: number | null; // null = supresión k-anonimato (n<5)
 }
 
+// v_pub_mr_demografia_universo (migración 056, 2026-08-27): demografía del universo COMPLETO
+// de Mujeres ROFÉ (postulantes_mr, fuente_pestana='general' -- 5.111), NO Q10-gated -- a
+// diferencia de v_mr_demografia/v_pub_impacto_financiero_mr, que solo ven a quien matriculó.
+// Mismo formato largo que PubDemografia. Comparado contra el Power BI externo
+// tocaunavida.org/reportes-mr (2026-08-26/27). dimension ∈ tipo_vivienda | estrato |
+// nivel_estudio | estado_civil | edad_rango | ingresos_familiares | tipo_credito (categoria
+// 'microcredito'|'icredit'). Sin filtro de cohorte/estado/ciudad -- ver v_pub_mr_universo para
+// ciudad. leerSeguro por si el frontend se despliega antes que la vista.
+export interface PubMrDemografiaUniverso {
+  dimension: string;
+  categoria: string;
+  total: number | null;
+}
+
+// v_pub_mr_formacion_universo (migración 056, 2026-08-27): distribución del universo COMPLETO
+// de MR por Nº de cursos completados (0 a 5+), TODOS los años juntos (pedido explícito: "un
+// solo grupo", sin separar cohorte/año). "0" incluye a quien nunca tuvo matrícula Q10.
+export interface PubMrFormacionUniverso {
+  cursos_completados: string; // '0'..'4' | '5+'
+  total: number | null;
+}
+
 // v_pub_retencion_ciudad (migración 046): retención por grupo_ciudad para la cohorte, agregada y
 // k-anon (supresión si ingresados<5). activos = personas activas por ciudad (Seguimiento en la
 // cohorte viva); retirados = retiros de esa cohorte cuyo participante tiene esa ciudad. Suman al
@@ -557,6 +579,10 @@ export interface Datos {
   // Aprobación canónica por ciudad, solo JC (v_pub_aprobacion_ciudad_jc, auditoría 2026-08-26).
   // leerSeguro por el mismo motivo que retencionCiudad.
   aprobacionCiudadJc: AprobacionCursoCiudad[];
+  // Demografía + formación del universo COMPLETO MR, sin Q10 (migración 056, 2026-08-27).
+  // leerSeguro por el mismo motivo que retencionCiudad.
+  mrDemografiaUniverso: PubMrDemografiaUniverso[];
+  mrFormacionUniverso: PubMrFormacionUniverso[];
   // v_pub_cohorte: canon oficial por cohorte (ingresados/activos/retirados/pct_aprobados).
   // Cerradas 2019–2025 desde cohorte_historico (culminantes+retirados=seleccionados); viva 2026
   // desde en_seguimiento_jc. Es la ÚNICA fuente con todos los años — cohorte_ingresos solo tiene
@@ -581,7 +607,7 @@ export interface Datos {
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc, mrDemografiaUniverso, mrFormacionUniverso] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -628,8 +654,10 @@ export async function cargarTodo(): Promise<Datos> {
       leerSeguro<PubImpactoFinancieroMr>('v_pub_impacto_financiero_mr'),
       leerSeguro<PubMrUniverso>('v_pub_mr_universo'),
       leerSeguro<AprobacionCursoCiudad>('v_pub_aprobacion_ciudad_jc?order=cursaron.desc'),
+      leerSeguro<PubMrDemografiaUniverso>('v_pub_mr_demografia_universo'),
+      leerSeguro<PubMrFormacionUniverso>('v_pub_mr_formacion_universo'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc, mrDemografiaUniverso, mrFormacionUniverso };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {
@@ -664,6 +692,8 @@ export const ETIQUETA_MR: Record<string, string> = {
   propia: 'Propia',
   con_emprendimiento: 'Con emprendimiento',
   sin_emprendimiento: 'Sin emprendimiento',
+  microcredito: 'Microcrédito',
+  icredit: 'iCredit',
 };
 
 // Orden de presentación dentro de cada dimensión (las no listadas van por total desc).
