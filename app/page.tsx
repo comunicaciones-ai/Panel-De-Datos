@@ -235,6 +235,12 @@ export default function Pagina() {
   const [ciudadElegida, setCiudadElegida] = useState<string | null>(null); // grupo_ciudad
   const [municipioElegido, setMunicipioElegido] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>('Resumen');
+  // Toggle MR (pedido 2026-08-27): por defecto se ve el universo histórico completo (estilo
+  // Power BI — demografía + formación, TODAS las mujeres, sin cohorte/Q10). Las vistas basadas
+  // en Q10 (cohorte-curso, ~11% del universo) quedan detrás de este botón explícito, en vez de
+  // ser lo primero que se ve. Solo aplica a MR — JC sigue siendo Q10 siempre (no tiene el
+  // concepto de "universo sin Q10").
+  const [mostrarQ10Mr, setMostrarQ10Mr] = useState(false);
   // Unidad del desglose "Estado de la cohorte": matrículas (inscripciones) o estudiantes (personas).
   // Solo tiene sentido bajo Estado=Activos (v_cohorte_estudiantes* no distingue retirados).
   const [unidadEstadoCohorte, setUnidadEstadoCohorte] = useState<'matriculas' | 'estudiantes'>('matriculas');
@@ -1103,6 +1109,82 @@ export default function Pagina() {
     );
   }
 
+  // Vista por defecto de MR (2026-08-27, toggle Universo/Q10 de arriba): universo histórico
+  // completo, sin cohorte/Q10 — KPI (v_pub_mr_universo) + demografía (v_pub_mr_demografia_
+  // universo) + formación (v_pub_mr_formacion_universo). Mismo contenido que ya vivía dentro
+  // de los tabs Resumen/Demografía (se deja igual ahí, sin tocar, para cuando el toggle está
+  // en "Datos Q10" y se navega por tabs) — acá se repite standalone para que sea lo primero
+  // que se ve, sin tabs, sin depender de cohorte/estado.
+  function VistaUniversoMr() {
+    return (
+      <>
+        {mrUniversoResumen && (
+          <Seccion
+            titulo="Universo de Mujeres ROFÉ (con y sin Q10)"
+            nota={
+              (ciudadElegida
+                ? `Solo ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}. Incluye TODAS las mujeres registradas en la base (postulantes y matriculadas), no solo las que tienen curso en Q10 — por eso "Sin Q10" suele ser la mayoría, no un error.`
+                : 'Incluye TODAS las mujeres registradas en la base (postulantes y matriculadas), no solo las que tienen curso en Q10 — por eso "Sin Q10" suele ser la mayoría, no un error.'
+              ) + ' Esta caja solo filtra por Ciudad — es el universo completo histórico, sin cohorte ni Q10.'
+            }
+          >
+            {mrUniversoResumen.hayDatos ? (
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <Kpi titulo="Universo total" valor={mrUniversoResumen.total.toLocaleString('es-CO')} detalle="Con y sin matrícula Q10" />
+                  <Kpi titulo="Con Q10" valor={mrUniversoResumen.conQ10.toLocaleString('es-CO')} detalle="Matricularon en un curso" acento={C.verde} />
+                  <Kpi titulo="Sin Q10" valor={mrUniversoResumen.sinQ10.toLocaleString('es-CO')} detalle="Solo candidatas/postulantes, aún cuentan" acento={C.naranja} />
+                </div>
+                {mrUniversoResumen.sinDatoQ10 > 0 && (
+                  <p className="text-xs text-slate-400 mt-3">
+                    +{mrUniversoResumen.sinDatoQ10.toLocaleString('es-CO')} más sin fecha de registro identificable — cuentan en el total, pero no se muestra si tienen Q10 o no (grupo muy chico para desglosar sin arriesgar privacidad).
+                  </p>
+                )}
+              </>
+            ) : (
+              <EnConstruccion detalle="Esta vista requiere v_pub_mr_universo (migración 054), propuesta pero aún no aplicada en la base de datos." />
+            )}
+          </Seccion>
+        )}
+        <div className="grid md:grid-cols-2 gap-6 my-6">
+          {DIMENSIONES_UNIVERSO_MR.map((dim) => (
+            <TarjetaDemografiaUniverso key={dim} dimension={dim} />
+          ))}
+        </div>
+        {(() => {
+          const filasForm = (datos?.mrFormacionUniverso ?? []).filter((f) => f.total != null) as
+            { cursos_completados: string; total: number }[];
+          if (filasForm.length === 0) {
+            return (
+              <Seccion titulo="Formación (cursos completados)">
+                <NoAplica motivo="sin datos suficientes (o vista aún no aplicada)." suave />
+              </Seccion>
+            );
+          }
+          const total = filasForm.reduce((s, f) => s + f.total, 0);
+          const sinCursos = filasForm.find((f) => f.cursos_completados === '0')?.total ?? 0;
+          const pctSinCursos = total ? Math.round((1000 * sinCursos) / total) / 10 : 0;
+          const filasBarra = filasForm
+            .map((f) => ({ etiqueta: f.cursos_completados, total: f.total }))
+            .sort((a, b) => (a.etiqueta === '5+' ? 1 : b.etiqueta === '5+' ? -1 : Number(a.etiqueta) - Number(b.etiqueta)));
+          return (
+            <Seccion
+              titulo="Formación — cursos MR completados"
+              nota="De las 5.111, cuántas completaron 0, 1, 2... cursos en Q10, sumando todos los años juntos (no separado por cohorte)."
+            >
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
+                <Kpi titulo="Mujeres con este dato" valor={total.toLocaleString('es-CO')} detalle="universo completo" />
+                <Kpi titulo="Sin ningún curso completado" valor={sinCursos.toLocaleString('es-CO')} detalle={`${pctSinCursos}% del universo`} acento={C.naranja} />
+                <Kpi titulo="Con al menos 1 curso" valor={(total - sinCursos).toLocaleString('es-CO')} detalle={`${(100 - pctSinCursos).toFixed(1)}% del universo`} acento={C.verde} />
+              </div>
+              <GraficoBarras datos={filasBarra} dataKey="total" nombre="Mujeres" color={C.azul2} etiquetaKey="etiqueta" />
+            </Seccion>
+          );
+        })()}
+      </>
+    );
+  }
+
   return (
     <>
       <Hero tema={programa} />
@@ -1148,6 +1230,33 @@ export default function Pagina() {
             </button>
           ))}
         </div>
+        {/* Toggle Universo/Q10, SOLO MR (2026-08-27). Por defecto "Universo histórico" — no
+            depende de cohorte, no necesita el resto de controles de abajo. "Q10" revela el
+            selector de cohorte + los tabs de siempre, sin tocar su lógica. */}
+        {programa === 'mr' && (
+          <div className="flex gap-1 tarjeta-glass p-1">
+            {([[false, '📊 Universo histórico'], [true, '🎓 Datos Q10 (matriculadas)']] as const).map(
+              ([val, txt]) => (
+                <button
+                  key={String(val)}
+                  onClick={() => setMostrarQ10Mr(val)}
+                  className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    mostrarQ10Mr === val ? 'pill-metal pill-metal-rosa' : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {txt}
+                </button>
+              ),
+            )}
+          </div>
+        )}
+      </div>
+
+      {programa === 'mr' && !mostrarQ10Mr ? (
+        <VistaUniversoMr />
+      ) : (
+      <>
+      <div className="flex flex-wrap items-center gap-3 mb-4">
         {/* Selector de cohorte (actual + históricas de Q10) */}
         <div className="flex gap-1 tarjeta-glass p-1">
           {cohortes.map((coh) => (
@@ -2482,6 +2591,8 @@ export default function Pagina() {
       )}
       {tab === 'Emoflow' && programa === 'mr' && (
         <NoAplica motivo="Mujeres ROFÉ no usa la plataforma Emoflow (0 matrículas en la fuente)." />
+      )}
+      </>
       )}
       </div>
     </>
