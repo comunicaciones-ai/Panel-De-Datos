@@ -928,7 +928,15 @@ export default function Pagina() {
     };
   }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
 
-  const cambiarPrograma = (p: Programa) => setPrograma(p);
+  // Retención y Asistencia se quitaron del tab bar de MR (pedido 2026-08-27, tras la
+  // auditoría de 2 agentes): miden procesos que MR no tiene estructurados de la misma forma
+  // que JC (selección anual por cohorte / sesiones de clase con asistencia Zoom capturada) —
+  // "innecesarias" para MR, decisión explícita del usuario, no un fallback automático. Si el
+  // tab activo queda huérfano al cambiar a MR, se cae a Resumen.
+  const cambiarPrograma = (p: Programa) => {
+    setPrograma(p);
+    if (p === 'mr' && (tab === 'Retención' || tab === 'Asistencia')) setTab('Resumen');
+  };
   const cambiarCohorte = (coh: string) => setCohorteElegida(coh);
 
   if (error)
@@ -1358,9 +1366,13 @@ export default function Pagina() {
             )}
           </div>
         )}
-        {/* Tabs — siempre las 7, cada sección decide "no aplica" internamente */}
+        {/* Tabs — 8 para JC. Para MR, Retención y Asistencia se quitan del todo (pedido
+            2026-08-27): miden procesos que MR no tiene estructurados como JC (selección
+            anual por cohorte / sesiones con asistencia Zoom capturada) — no es "sin datos
+            para este filtro", es que el proceso no existe, así que no tiene sentido dejar el
+            botón. El resto decide "no aplica" internamente como siempre. */}
         <nav className="flex gap-1 tarjeta-glass p-1 flex-wrap">
-          {TABS.map((t) => (
+          {TABS.filter((t) => programa !== 'mr' || (t !== 'Retención' && t !== 'Asistencia')).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -2143,47 +2155,61 @@ export default function Pagina() {
         // situación de JC (en_marcha/idea/interesado, esa es harina de otro costal); acá se
         // muestra si tiene emprendimiento + acceso a microcrédito + banda de ingresos
         // familiares. Ver docs/procesos/plan-ampliacion-panel-datos-2026-08-10.md.
-        if (impactoFinancieroMrFiltrada.length === 0) {
-          return <NoAplica motivo="sin datos de impacto financiero para este filtro (cohorte/estado/ciudad elegidos)." suave />;
-        }
-        const dimTotal = (dim: string, cat: string) =>
+        //
+        // FIX 2026-08-27 (auditoría de 2 agentes): "Acceso a microcrédito" e "Ingresos
+        // familiares" ya NO usan la fuente Q10-gated (`impactoFinancieroMrFiltrada`, ~11% del
+        // universo) — pasan a `mrDemografiaUniverso` (postulantes_mr completo, `v_pub_mr_
+        // demografia_universo`, migración 056), mismo patrón ya usado en Demografía. Sin
+        // filtro de cohorte/estado/ciudad (esa vista es "un solo grupo" a propósito). Solo
+        // "Con emprendimiento" se queda en la fuente Q10: `tiene_emprendimiento` de
+        // `postulantes_mr` únicamente se escribe en TRUE (nunca FALSE explícito, ver
+        // sync_postulantes_mr.py) — cruzarlo produciría un "no" inventado, así que ese
+        // indicador puntual sigue siendo Q10-only (limitación documentada, no arreglable sin
+        // un dato nuevo).
+        const dimUniverso = (dim: string, cat: string) =>
+          (datos?.mrDemografiaUniverso ?? []).find((d) => d.dimension === dim && d.categoria === cat)?.total ?? 0;
+        const dimTotalQ10 = (dim: string, cat: string) =>
           impactoFinancieroMrFiltrada.find((d) => d.dimension === dim && d.categoria === cat)?.total ?? 0;
-        const emprendeSi = dimTotal('tiene_emprendimiento', 'si');
-        const emprendeNo = dimTotal('tiene_emprendimiento', 'no');
+        const emprendeSi = dimTotalQ10('tiene_emprendimiento', 'si');
+        const emprendeNo = dimTotalQ10('tiene_emprendimiento', 'no');
         const totalEmprendeConDato = emprendeSi + emprendeNo;
         const pctEmprendimientoMr = totalEmprendeConDato ? Math.round((100 * emprendeSi) / totalEmprendeConDato) : 0;
-        const creditoSi = dimTotal('tiene_credito', 'si');
-        const creditoNo = dimTotal('tiene_credito', 'no');
-        const totalCreditoConDato = creditoSi + creditoNo;
-        const pctCreditoMr = totalCreditoConDato ? Math.round((100 * creditoSi) / totalCreditoConDato) : 0;
-        const ingresosFilas = impactoFinancieroMrFiltrada.filter((d) => d.dimension === 'ingresos_familiares');
+        const creditoSi = dimUniverso('tipo_credito', 'microcredito') + dimUniverso('tipo_credito', 'icredit');
+        const totalUniverso = (datos?.mrDemografiaUniverso ?? [])
+          .filter((d) => d.dimension === 'ingresos_familiares')
+          .reduce((s, d) => s + (d.total ?? 0), 0) || 1; // denominador aprox. para el % de crédito
+        const pctCreditoMr = Math.round((1000 * creditoSi) / totalUniverso) / 10;
+        const ingresosFilas = (datos?.mrDemografiaUniverso ?? []).filter((d) => d.dimension === 'ingresos_familiares');
         const totalIngresosMr = ingresosFilas.reduce((s, d) => s + (d.total ?? 0), 0);
         const emprendimientoPie = [
           { nombre: 'Con emprendimiento', total: emprendeSi, color: C.verde },
           { nombre: 'Sin emprendimiento', total: emprendeNo, color: C.amarillo },
         ];
         const creditoPie = [
-          { nombre: 'Con microcrédito', total: creditoSi, color: C.azul3 },
-          { nombre: 'Sin microcrédito', total: creditoNo, color: C.amarillo },
+          { nombre: 'Microcrédito', total: dimUniverso('tipo_credito', 'microcredito'), color: C.azul3 },
+          { nombre: 'iCredit', total: dimUniverso('tipo_credito', 'icredit'), color: C.amarillo },
         ];
         const ingresosBarras = ingresosFilas
           .map((d) => ({ etiqueta: d.categoria, total: d.total ?? 0 }))
           .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
+        if (totalEmprendeConDato === 0 && creditoSi === 0 && totalIngresosMr === 0) {
+          return <NoAplica motivo="sin datos de impacto financiero disponibles." suave />;
+        }
         return (
           <>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-              <Kpi titulo="Con emprendimiento" valor={`${pctEmprendimientoMr}%`} detalle={`${emprendeSi.toLocaleString('es-CO')} de ${totalEmprendeConDato.toLocaleString('es-CO')} con dato`} />
-              <Kpi titulo="Beneficiarias de crédito" valor={`${pctCreditoMr}%`} detalle={`${creditoSi.toLocaleString('es-CO')} con microcrédito`} />
-              <Kpi titulo="Con dato de ingresos" valor={totalIngresosMr.toLocaleString('es-CO')} detalle={`${cohorte} · ${ETIQUETA_ESTADO[estado]}`} />
+              <Kpi titulo="Con emprendimiento" valor={`${pctEmprendimientoMr}%`} detalle={`${emprendeSi.toLocaleString('es-CO')} de ${totalEmprendeConDato.toLocaleString('es-CO')} con dato · ${cohorte} · ${ETIQUETA_ESTADO[estado]} (Q10)`} />
+              <Kpi titulo="Con microcrédito" valor={creditoSi.toLocaleString('es-CO')} detalle={`${pctCreditoMr}% del universo completo`} />
+              <Kpi titulo="Con dato de ingresos" valor={totalIngresosMr.toLocaleString('es-CO')} detalle="Universo completo (postulantes + matriculadas)" />
             </div>
             <div className="grid md:grid-cols-2 gap-6">
-              <Seccion titulo="Emprendimiento" nota="Con emprendimiento = registra un emprendimiento con nombre en la BD.">
+              <Seccion titulo="Emprendimiento" nota={`Con emprendimiento = registra un emprendimiento con nombre en la BD. Solo matriculadas Q10 (${cohorte} · ${ETIQUETA_ESTADO[estado]}) — sin equivalente universo-completo (postulantes_mr no distingue "no tiene" de "sin dato" para este campo).`}>
                 <GraficoEmprendimiento datos={emprendimientoPie} />
               </Seccion>
-              <Seccion titulo="Acceso a microcrédito" nota="Beneficiarias con al menos un crédito registrado.">
+              <Seccion titulo="Acceso a crédito" nota="Universo completo (postulantes_mr, sin filtro de cohorte/estado/ciudad) — Microcrédito vs iCredit.">
                 <GraficoEmprendimiento datos={creditoPie} />
               </Seccion>
-              <Seccion titulo="Ingresos familiares" nota="Banda autoreportada en el formulario de ingreso.">
+              <Seccion titulo="Ingresos familiares" nota="Banda autoreportada en el formulario de ingreso. Universo completo, sin filtro de cohorte/estado/ciudad.">
                 <GraficoBarras datos={ingresosBarras} dataKey="total" nombre="Personas" color={C.azul2} rotarEtiquetas />
               </Seccion>
               <Seccion titulo="Sectores de emprendimiento">
