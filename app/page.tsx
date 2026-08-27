@@ -177,6 +177,19 @@ function EnConstruccion({ detalle }: { detalle: string }) {
   );
 }
 
+// Aviso corto y consistente para filtros globales (Estado/Ciudad/Municipio/Cohorte) que están
+// visibles y clickeables en la barra superior pero NO tienen efecto en la pestaña activa —
+// regla del rediseño (§2.3, ver NoAplica arriba): nunca dejar un control silenciosamente inerte,
+// siempre decir por qué. Auditoría 2026-08-26 encontró varios de estos sin ningún aviso.
+function NotaFiltros({ inaplicables }: { inaplicables: string[] }) {
+  if (inaplicables.length === 0) return null;
+  return (
+    <p className="text-xs text-slate-400 mb-4">
+      ℹ️ En esta pestaña no {inaplicables.length > 1 ? 'aplican' : 'aplica'}: {inaplicables.join(' · ')}.
+    </p>
+  );
+}
+
 // Suma `total` (respeta null = celda suprimida por k-anonimato, se ignora en vez de contarla
 // como 0) por categoria, para una dimension de v_pub_demografia ya filtrada por
 // programa/cohorte/estado/ciudad.
@@ -709,8 +722,13 @@ export default function Pagina() {
       retirados: a.retirados,
     };
   };
+  // BUG corregido 2026-08-26: para 'retirados' el denominador NO puede ser solo `a.retirados`
+  // (eso cuenta únicamente a quienes se retiraron SIN aprobar ese curso puntual — ver
+  // aprobacion_cursos). El universo real de retirados evaluado en cada curso es
+  // `retirados + aprobados_retirados`; usar solo `retirados` producía denominadores más chicos
+  // que el numerador y KPIs de "Aprobación" imposibles (ej. 206%) en la pestaña Cursos.
   const totalPorEstado = (a: (typeof aprobacionProg)[number]) =>
-    estado === 'activos' ? a.activos : estado === 'retirados' ? a.retirados : a.cursaron;
+    estado === 'activos' ? a.activos : estado === 'retirados' ? a.retirados + a.aprobados_retirados : a.cursaron;
   const aprobadosPorEstado = (a: (typeof aprobacionProg)[number]) =>
     estado === 'activos' ? a.aprobados : estado === 'retirados' ? a.aprobados_retirados
       : (a.aprobados_total ?? a.aprobados + a.aprobados_retirados);
@@ -728,7 +746,13 @@ export default function Pagina() {
     let matriculas = ps?.matriculas ?? 0;
     let completadas = ps?.completadas ?? 0;
     let promedio = ps?.promedio_avance ? `${ps.promedio_avance}%` : '—';
-    let edadProm = co?.edad_promedio ? Number(co.edad_promedio).toFixed(1) : '—';
+    // BUG corregido 2026-08-26: cohorte_stats.edad_promedio se calcula SOLO sobre activos
+    // (verificado en Supabase: total_participantes coincide exacto con el conteo de activos,
+    // no con ingresados) — mostrarlo bajo Estado=Todos/Retirados era la edad de los activos
+    // mal rotulada, y no cambiaba nunca al mover el filtro. Se oculta fuera de Activos, igual
+    // que Demografía ya hace con el resto del dato sociodemográfico de retirados (dato parcial,
+    // no confiable todavía). El KPI cae solo al de "Cursos" ya previsto más abajo.
+    let edadProm = estado === 'activos' && co?.edad_promedio ? Number(co.edad_promedio).toFixed(1) : '—';
 
     if (hayFiltroCiudad && geografiaResumen) {
       // v_pub_geografia cubre ambos programas — reemplaza al viejo statsProgramaPorCiudad
@@ -1135,7 +1159,7 @@ export default function Pagina() {
                 valor={String(kpis.cifraEstado)}
                 detalle={
                   estado === 'todos'
-                    ? `Cohorte ${cohorte} completa: ${kpis.ingresados} ingresados (canon oficial)`
+                    ? `Cohorte ${cohorte} completa: ${kpis.ingresados ?? '—'} ingresados (canon oficial)`
                     : estado === 'retirados'
                       ? `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canon oficial)`
                       : kpis.usarActualesSeguimiento
@@ -1214,9 +1238,10 @@ export default function Pagina() {
             <Seccion
               titulo="Universo de Mujeres ROFÉ (con y sin Q10)"
               nota={
-                ciudadElegida
+                (ciudadElegida
                   ? `Solo ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}. Incluye TODAS las mujeres registradas en la base (postulantes y matriculadas), no solo las que tienen curso en Q10 — por eso "Sin Q10" suele ser la mayoría, no un error.`
                   : 'Incluye TODAS las mujeres registradas en la base (postulantes y matriculadas), no solo las que tienen curso en Q10 — por eso "Sin Q10" suele ser la mayoría, no un error.'
+                ) + ' Esta caja solo filtra por Ciudad: Cohorte y Estado (arriba) no la afectan — es el universo completo histórico.'
               }
             >
               {mrUniversoResumen.hayDatos ? (
@@ -1228,6 +1253,14 @@ export default function Pagina() {
               ) : (
                 <EnConstruccion detalle="Esta vista requiere v_pub_mr_universo (migración 054), propuesta pero aún no aplicada en la base de datos." />
               )}
+            </Seccion>
+          )}
+          {mostrarCanonico && hayFiltroCiudad && (
+            // BUG corregido 2026-08-26: esta sección desaparecía en silencio al elegir una
+            // ciudad (aprobacion_cursos no trae grupo_ciudad) — violaba la regla propia del
+            // panel de nunca ocultar algo sin explicar por qué (ver NoAplica arriba).
+            <Seccion titulo="Estado de la cohorte">
+              <NoAplica motivo="este desglose (aprobadas / en progreso / en riesgo / retiradas) sale de aprobacion_cursos, que no tiene desglose por ciudad. Quitá el filtro de ciudad para verlo — la tarjeta de esta ciudad más abajo sí sigue activa." suave />
             </Seccion>
           )}
           {kpis.esCanonico && kpis.estadoCohorte && (
@@ -1338,7 +1371,7 @@ export default function Pagina() {
           {esActual && programa === 'jc' && aprobacionAjustadaProg.length > 0 && (
             <Seccion
               titulo="Verificación cruzada: aprobación oficial vs. recalculada"
-              nota="Compara APROBADOS ACTIVOS (mismo universo) entre aprobacion_cursos (pipeline oficial de Q10) y un recálculo directo desde Supabase (enrollments + en_seguimiento_jc). Antes comparaba los totales con retirados y siempre daba 'Revisar', porque la cohorte oficial (832) incluye ~55 retiros antiguos que Supabase nunca carga como filas — ese hueco es estructural, no un error, así que ya no se compara. La población activa tampoco es idéntica (oficial ≈ 754 de cohorte_ingresos vs recálculo ≈ 751 de en_seguimiento_jc); esa pequeña brecha se tolera. Ahora 'Revisar' significa un descuadre REAL (p. ej. el sync de aprobación quedó atrasado, como pasó el 2026-07-23) y sí amerita mirarlo. 'Cursaron (oficial)' = cohorte completa 832, de referencia (no se compara). 'Cursando ahora' = activos con avance <80% en ese curso puntual."
+              nota="Compara APROBADOS ACTIVOS (mismo universo) entre aprobacion_cursos (pipeline oficial de Q10) y un recálculo directo desde Supabase (enrollments + en_seguimiento_jc). Antes comparaba los totales con retirados y siempre daba 'Revisar', porque la cohorte oficial (832) incluye ~55 retiros antiguos que Supabase nunca carga como filas — ese hueco es estructural, no un error, así que ya no se compara. La población activa tampoco es idéntica (oficial ≈ 754 de cohorte_ingresos vs recálculo ≈ 751 de en_seguimiento_jc); esa pequeña brecha se tolera. Ahora 'Revisar' significa un descuadre REAL (p. ej. el sync de aprobación quedó atrasado, como pasó el 2026-07-23) y sí amerita mirarlo. 'Cursaron (oficial)' = cohorte completa 832, de referencia (no se compara). 'Cursando ahora' = activos con avance <80% en ese curso puntual. Esta tabla es siempre nacional — el filtro de Ciudad no la afecta."
             >
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -1434,6 +1467,7 @@ export default function Pagina() {
 
         return (
           <>
+            <NotaFiltros inaplicables={['Estado (esta pestaña siempre muestra activos y retirados desglosados)', 'Ciudad en el historial por cohorte de arriba (es nacional por año)', 'Municipio']} />
             {/* Historial por cohorte — canon-exacto, todos los años */}
             {hist.length > 0 && (
               <Seccion
@@ -1525,6 +1559,7 @@ export default function Pagina() {
 
       {tab === 'Cursos' && mostrarCanonico && (
         <>
+          <NotaFiltros inaplicables={hayFiltroCiudad ? ['Ciudad (esta vista canónica es nacional; ver pestaña Resumen para el detalle por ciudad)', 'Municipio'] : ['Municipio']} />
           <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4">
             <button
               onClick={() => setUnidadEstadoCohorte('matriculas')}
@@ -1702,6 +1737,7 @@ export default function Pagina() {
           <NoAplica motivo="el histórico diario no distingue cohortes — solo se muestra para la cohorte vigente." />
         ) : (
           <>
+            <NotaFiltros inaplicables={['Estado (esta serie no distingue activos de retirados)', 'Municipio']} />
             {(() => {
               // Header de diagnóstico: valor ACTUAL + delta vs el inicio de la serie, con dirección
               // (regla del escéptico: "último valor" solo, sin contexto de tendencia, no diagnostica).
@@ -1820,6 +1856,7 @@ export default function Pagina() {
           .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
         return (
           <>
+            <NotaFiltros inaplicables={['Municipio']} />
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
               <Kpi titulo="Con emprendimiento" valor={`${pctEmprendimientoMr}%`} detalle={`${emprendeSi.toLocaleString('es-CO')} de ${totalEmprendeConDato.toLocaleString('es-CO')} con dato`} />
               <Kpi titulo="Beneficiarias de crédito" valor={`${pctCreditoMr}%`} detalle={`${creditoSi.toLocaleString('es-CO')} con microcrédito`} />
@@ -1854,6 +1891,7 @@ export default function Pagina() {
           <NoAplica motivo="sin datos para este filtro (cohorte/estado/ciudad elegidos)." suave />
         ) : (
           <>
+          <NotaFiltros inaplicables={['Municipio']} />
           {(() => {
             // Header de diagnóstico: total diagnosticados + % que YA emprende (en marcha) + %
             // potencial (idea/interesado). Conteo Y % siempre (regla del escéptico). ORDEN_SITUACION
@@ -1892,16 +1930,20 @@ export default function Pagina() {
         <EnConstruccion detalle="La demografía del segmento Retirados aún se está trabajando: la información sociodemográfica de quienes ya salieron del programa es parcial y todavía no representa de forma fiable al total de retiros. Para el desglose demográfico usá el filtro Activos o Todos." />
       ) : tab === 'Demografía' ? (
         <>
-          <p className="text-xs text-slate-400 mb-4">
+          <p className="text-xs text-slate-400 mb-1">
             {NOMBRE_PROGRAMA[programa]} · {cohorte} · {ETIQUETA_ESTADO[estado]}
-            {programa === 'mr' ? ` — fuente: BD-Mujeres ROFÉ (${totalMrConDatos} mujeres con datos sociodemográficos).` : ' — fuente: BD de monitorias.'}
+            {programa === 'mr' ? ' — fuente: BD-Mujeres ROFÉ.' : ' — fuente: BD de monitorias.'}
           </p>
+          <NotaFiltros inaplicables={['Municipio']} />
           <div className="grid md:grid-cols-2 gap-6">
             {DIMENSIONES_DEMOGRAFIA.map((dim) => (
               <TarjetaDemografia key={dim} dimension={dim} />
             ))}
             {programa === 'mr' ? (
-              <Seccion titulo="Emprendimiento" nota="Con emprendimiento = registra un emprendimiento con nombre en la BD.">
+              <Seccion
+                titulo="Emprendimiento"
+                nota={`Con emprendimiento = registra un emprendimiento con nombre en la BD. ${totalMrConDatos} mujeres con dato — fuente legacy (v_mr_demografia): a diferencia de las demás tarjetas de este tab, NO respeta Cohorte, Estado ni Ciudad (siempre es el total histórico completo). Pendiente de migrar a v_pub_demografia.`}
+              >
                 <GraficoEmprendimiento datos={emprendimientoBooleanoMr} />
               </Seccion>
             ) : (
@@ -1945,6 +1987,7 @@ export default function Pagina() {
           : null;
         return (
           <>
+            <NotaFiltros inaplicables={['Municipio']} />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <Kpi
                 titulo="Asistencia promedio"
@@ -2004,6 +2047,13 @@ export default function Pagina() {
                 : 'Universo histórico completo del CSV de Emoflow: suma personas en retiro probable y usuarios que nunca se matricularon en Q10.'}
             </p>
           </div>
+          <NotaFiltros
+            inaplicables={[
+              'Estado (arriba) — usá el selector de alcance de esta pestaña en su lugar',
+              'Municipio',
+              ...(!esActual ? [`Cohorte — Emoflow no distingue cohorte, siempre muestra la foto vigente aunque arriba esté elegida "${cohorte}"`] : []),
+            ]}
+          />
 
           {emoflowKpis ? (
             <>
