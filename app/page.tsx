@@ -485,13 +485,22 @@ export default function Pagina() {
     );
   }, [datos, programa, cohorte, estado, ciudadElegida]);
 
+  // Filtro global Estado × alcance local de Emoflow (cableado 2026-08-26): Retirados usa las
+  // vistas _retirado (ya cargadas en lib/api.ts desde antes, nunca conectadas — bug encontrado
+  // en la auditoría). Fuera de Retirados, el alcance local sigue mandando (canónico=vigentes vs
+  // todos=histórico completo, incluye retiro probable y nunca-matriculados — no es lo mismo que
+  // "Retirados" oficial, por eso quedan como dos controles separados en vez de fusionarse).
+  const fuenteEmoflow: 'canonico' | 'todos' | 'retirado' =
+    estado === 'retirados' ? 'retirado' : alcanceEmoflow;
+
   // Emoflow — KPIs. Sin ciudad: agregado nacional. Con ciudad: la fila de esa ciudad (JC-only,
   // Emoflow no tiene matrículas MR — ver "no aplica" del tab).
   const emoflowKpis = useMemo(() => {
     if (!datos) return null;
-    const canon = alcanceEmoflow === 'canonico';
+    const elegir = <T,>(canonico: T, todos: T, retirado: T) =>
+      fuenteEmoflow === 'retirado' ? retirado : fuenteEmoflow === 'canonico' ? canonico : todos;
     if (ciudadElegida) {
-      const fuente = canon ? datos.emoflowPorCiudadCanonico : datos.emoflowPorCiudad;
+      const fuente = elegir(datos.emoflowPorCiudadCanonico, datos.emoflowPorCiudad, datos.emoflowPorCiudadRetirado);
       const c = fuente?.find((e) => e.grupo_ciudad === ciudadElegida);
       if (!c) return null;
       return {
@@ -502,7 +511,7 @@ export default function Pagina() {
         inactivos30: c.inactivos_30d,
       };
     }
-    const r = (canon ? datos.emoflowResumenCanonico : datos.emoflowResumen)?.[0];
+    const r = elegir(datos.emoflowResumenCanonico, datos.emoflowResumen, datos.emoflowResumenRetirado)?.[0];
     if (!r) return null;
     return {
       participantes: r.participantes,
@@ -511,16 +520,17 @@ export default function Pagina() {
       activos7: r.activos_7d,
       inactivos30: r.inactivos_30d,
     };
-  }, [datos, ciudadElegida, alcanceEmoflow]);
+  }, [datos, ciudadElegida, fuenteEmoflow]);
 
   const emoflowBandas = useMemo(() => {
     if (!datos) return [];
-    const canon = alcanceEmoflow === 'canonico';
+    const elegir = <T,>(canonico: T, todos: T, retirado: T) =>
+      fuenteEmoflow === 'retirado' ? retirado : fuenteEmoflow === 'canonico' ? canonico : todos;
     const filas = ciudadElegida
-      ? ((canon ? datos.emoflowBandasCiudadCanonico : datos.emoflowBandasCiudad) ?? []).filter(
+      ? (elegir(datos.emoflowBandasCiudadCanonico, datos.emoflowBandasCiudad, datos.emoflowBandasCiudadRetirado) ?? []).filter(
           (b) => b.grupo_ciudad === ciudadElegida,
         )
-      : ((canon ? datos.emoflowBandasCanonico : datos.emoflowBandas) ?? []);
+      : (elegir(datos.emoflowBandasCanonico, datos.emoflowBandas, datos.emoflowBandasRetirado) ?? []);
     return [...filas]
       .sort((a, b) => a.orden - b.orden)
       .map((b) => ({
@@ -528,17 +538,21 @@ export default function Pagina() {
         participantes: b.participantes,
         pct_aprobacion: Number(b.pct_aprobacion ?? 0),
       }));
-  }, [datos, ciudadElegida, alcanceEmoflow]);
+  }, [datos, ciudadElegida, fuenteEmoflow]);
 
   const emoflowCiudades = useMemo(() => {
     if (!datos) return [];
     const fuente =
-      alcanceEmoflow === 'canonico' ? datos.emoflowPorCiudadCanonico : datos.emoflowPorCiudad;
+      fuenteEmoflow === 'retirado'
+        ? datos.emoflowPorCiudadRetirado
+        : fuenteEmoflow === 'canonico'
+          ? datos.emoflowPorCiudadCanonico
+          : datos.emoflowPorCiudad;
     return (fuente ?? []).map((c) => ({
       etiqueta: ETIQUETA_GRUPO[c.grupo_ciudad] ?? c.grupo_ciudad,
       ingresos_promedio: Number(c.ingresos_promedio ?? 0),
     }));
-  }, [datos, alcanceEmoflow]);
+  }, [datos, fuenteEmoflow]);
 
   // Evolución semanal de la actividad en Emoflow (% de la matrícula activa por semana), por
   // ciudad. Directo del CSV de Emoflow (tabla emoflow_actividad_semanal). Eje X = lunes de cada
@@ -1089,7 +1103,12 @@ export default function Pagina() {
                 Cada ciudad: <b>personas activas</b> · <b style={{ color: C.verde }}>% retención</b> (verde ≥90 · ámbar ≥80 · rojo &lt;80).
               </p>
             )}
-            {ciudadElegida && municipiosGrupo.length > 1 && (
+            {/* Solo en Resumen (auditoría 2026-08-26): ninguna otra pestaña tiene datos con
+                desglose de municipio (Demografía/Emprendimiento/Asistencia/Emoflow/Cursos/
+                Historial solo llegan a grupo_ciudad) — mostrarlo ahí era un control decorativo
+                que no cambiaba nada. Mejor ocultarlo donde no aplica que dejarlo clickeable
+                sin efecto. */}
+            {tab === 'Resumen' && ciudadElegida && municipiosGrupo.length > 1 && (
               <div className="flex gap-1 flex-wrap pl-2 border-l-2 border-slate-200/70">
                 <button
                   onClick={() => setMunicipioElegido(null)}
@@ -1467,7 +1486,7 @@ export default function Pagina() {
 
         return (
           <>
-            <NotaFiltros inaplicables={['Estado (esta pestaña siempre muestra activos y retirados desglosados)', 'Ciudad en el historial por cohorte de arriba (es nacional por año)', 'Municipio']} />
+            <NotaFiltros inaplicables={['Estado (esta pestaña siempre muestra activos y retirados desglosados)', 'Ciudad en el historial por cohorte de arriba (es nacional por año)']} />
             {/* Historial por cohorte — canon-exacto, todos los años */}
             {hist.length > 0 && (
               <Seccion
@@ -1559,7 +1578,7 @@ export default function Pagina() {
 
       {tab === 'Cursos' && mostrarCanonico && (
         <>
-          <NotaFiltros inaplicables={hayFiltroCiudad ? ['Ciudad (esta vista canónica es nacional; ver pestaña Resumen para el detalle por ciudad)', 'Municipio'] : ['Municipio']} />
+          <NotaFiltros inaplicables={hayFiltroCiudad ? ['Ciudad (esta vista canónica es nacional; ver pestaña Resumen para el detalle por ciudad)'] : []} />
           <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4">
             <button
               onClick={() => setUnidadEstadoCohorte('matriculas')}
@@ -1737,7 +1756,7 @@ export default function Pagina() {
           <NoAplica motivo="el histórico diario no distingue cohortes — solo se muestra para la cohorte vigente." />
         ) : (
           <>
-            <NotaFiltros inaplicables={['Estado (esta serie no distingue activos de retirados)', 'Municipio']} />
+            <NotaFiltros inaplicables={['Estado (esta serie no distingue activos de retirados)']} />
             {(() => {
               // Header de diagnóstico: valor ACTUAL + delta vs el inicio de la serie, con dirección
               // (regla del escéptico: "último valor" solo, sin contexto de tendencia, no diagnostica).
@@ -1856,7 +1875,6 @@ export default function Pagina() {
           .sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
         return (
           <>
-            <NotaFiltros inaplicables={['Municipio']} />
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
               <Kpi titulo="Con emprendimiento" valor={`${pctEmprendimientoMr}%`} detalle={`${emprendeSi.toLocaleString('es-CO')} de ${totalEmprendeConDato.toLocaleString('es-CO')} con dato`} />
               <Kpi titulo="Beneficiarias de crédito" valor={`${pctCreditoMr}%`} detalle={`${creditoSi.toLocaleString('es-CO')} con microcrédito`} />
@@ -1891,7 +1909,6 @@ export default function Pagina() {
           <NoAplica motivo="sin datos para este filtro (cohorte/estado/ciudad elegidos)." suave />
         ) : (
           <>
-          <NotaFiltros inaplicables={['Municipio']} />
           {(() => {
             // Header de diagnóstico: total diagnosticados + % que YA emprende (en marcha) + %
             // potencial (idea/interesado). Conteo Y % siempre (regla del escéptico). ORDEN_SITUACION
@@ -1934,7 +1951,6 @@ export default function Pagina() {
             {NOMBRE_PROGRAMA[programa]} · {cohorte} · {ETIQUETA_ESTADO[estado]}
             {programa === 'mr' ? ' — fuente: BD-Mujeres ROFÉ.' : ' — fuente: BD de monitorias.'}
           </p>
-          <NotaFiltros inaplicables={['Municipio']} />
           <div className="grid md:grid-cols-2 gap-6">
             {DIMENSIONES_DEMOGRAFIA.map((dim) => (
               <TarjetaDemografia key={dim} dimension={dim} />
@@ -1987,7 +2003,6 @@ export default function Pagina() {
           : null;
         return (
           <>
-            <NotaFiltros inaplicables={['Municipio']} />
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <Kpi
                 titulo="Asistencia promedio"
@@ -2022,18 +2037,25 @@ export default function Pagina() {
               de los estudiantes vigentes trae 17 en retiro probable y 68 que nunca llegaron a
               matricularse en Q10 (postulantes / retirados de años anteriores). Por defecto se
               muestra el universo canónico (742) para que este bloque cuadre con el resto del
-              panel; "Todos" permite ver la foto histórica completa. */}
+              panel; "Todos" permite ver la foto histórica completa.
+              Cableado 2026-08-26: si el filtro global Estado (arriba) está en "Retirados", este
+              toggle queda deshabilitado y manda el Estado global (usa las vistas _retirado, que
+              existían en el backend desde antes pero nunca se habían conectado — bug de la
+              auditoría). Fuera de Retirados, el alcance local sigue siendo el control real, porque
+              "Todos" acá no es lo mismo que el Estado "Todos" global (incluye gente que nunca
+              se matriculó en Q10). */}
           <div className="flex flex-wrap items-center gap-3 mb-4">
-            <div className="flex gap-1 tarjeta-glass p-1 w-fit">
+            <div className={`flex gap-1 tarjeta-glass p-1 w-fit ${estado === 'retirados' ? 'opacity-50' : ''}`}>
               {([['canonico', 'Solo estudiantes actuales'], ['todos', 'Todos (histórico)']] as const).map(
                 ([a, txt]) => (
                   <button
                     key={a}
                     onClick={() => setAlcanceEmoflow(a)}
+                    disabled={estado === 'retirados'}
                     className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                      alcanceEmoflow === a
+                      estado !== 'retirados' && alcanceEmoflow === a
                         ? 'pill-metal pill-metal-azul'
-                        : 'text-slate-600 hover:bg-slate-100'
+                        : 'text-slate-600 hover:bg-slate-100 disabled:cursor-not-allowed disabled:hover:bg-transparent'
                     }`}
                   >
                     {txt}
@@ -2042,15 +2064,16 @@ export default function Pagina() {
               )}
             </div>
             <p className="text-xs text-slate-500 max-w-xl">
-              {alcanceEmoflow === 'canonico'
-                ? 'Solo estudiantes vigentes según la pestaña Seguimiento — coherente con el resto del panel.'
-                : 'Universo histórico completo del CSV de Emoflow: suma personas en retiro probable y usuarios que nunca se matricularon en Q10.'}
+              {estado === 'retirados'
+                ? 'Mostrando Retirados según el filtro Estado de arriba — este selector de alcance no aplica a ese segmento.'
+                : alcanceEmoflow === 'canonico'
+                  ? 'Solo estudiantes vigentes según la pestaña Seguimiento — coherente con el resto del panel.'
+                  : 'Universo histórico completo del CSV de Emoflow: suma personas en retiro probable y usuarios que nunca se matricularon en Q10.'}
             </p>
           </div>
           <NotaFiltros
             inaplicables={[
-              'Estado (arriba) — usá el selector de alcance de esta pestaña en su lugar',
-              'Municipio',
+              ...(estado !== 'retirados' ? ['Estado (arriba) para Activos/Todos — usá el selector de alcance de esta pestaña'] : []),
               ...(!esActual ? [`Cohorte — Emoflow no distingue cohorte, siempre muestra la foto vigente aunque arriba esté elegida "${cohorte}"`] : []),
             ]}
           />
@@ -2083,15 +2106,17 @@ export default function Pagina() {
                   detalle={
                     ciudadElegida
                       ? undefined
-                      : alcanceEmoflow === 'canonico'
+                      : fuenteEmoflow === 'canonico'
                         ? 'matriculados y vigentes en Seguimiento'
-                        : `${(datos.emoflowResumen?.[0]?.con_match_supabase ?? 0).toLocaleString('es-CO')} cruzan con nuestra cohorte`
+                        : fuenteEmoflow === 'retirado'
+                          ? 'retirados oficiales de la cohorte (canon)'
+                          : `${(datos.emoflowResumen?.[0]?.con_match_supabase ?? 0).toLocaleString('es-CO')} cruzan con nuestra cohorte`
                   }
                 />
                 <Kpi
                   titulo="Activos (últimos 7 días)"
                   valor={emoflowKpis.participantes ? `${Math.round((emoflowKpis.activos7 / emoflowKpis.participantes) * 100)}%` : '—'}
-                  detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} de ${emoflowKpis.participantes.toLocaleString('es-CO')} ${alcanceEmoflow === 'canonico' ? 'vigentes' : 'del histórico'}`}
+                  detalle={`${emoflowKpis.activos7.toLocaleString('es-CO')} de ${emoflowKpis.participantes.toLocaleString('es-CO')} ${fuenteEmoflow === 'canonico' ? 'vigentes' : fuenteEmoflow === 'retirado' ? 'retirados' : 'del histórico'}`}
                 />
                 <Kpi
                   titulo="En riesgo de abandono"
@@ -2157,7 +2182,10 @@ export default function Pagina() {
                   titulo={ciudadElegida
                     ? `Evolución de ingresos — ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}`
                     : 'Evolución de ingresos al sistema'}
-                  nota="Usuarios activos = personas distintas que entraron ese día. Ingresos = total de registros de emoción (una persona genera varios en un día). Serie real desde los timestamps de Emoflow — arranca el 18 de marzo.">
+                  nota={
+                    'Usuarios activos = personas distintas que entraron ese día. Ingresos = total de registros de emoción (una persona genera varios en un día). Serie real desde los timestamps de Emoflow — arranca el 18 de marzo.' +
+                    (estado === 'retirados' ? ' Esta serie no tiene desglose por Estado — sigue mostrando el histórico completo, no solo retirados.' : '')
+                  }>
                   <GraficoHistorial
                     historial={evolucionDiaria}
                     metrica="ingresos"
@@ -2170,7 +2198,10 @@ export default function Pagina() {
               {!ciudadElegida && actividadSemanalUltima.datos.length > 0 && (
                 <Seccion
                   titulo={`% de matrícula activa — semana del ${actividadSemanalUltima.semana ?? '—'}`}
-                  nota="Personas distintas que entraron a Emoflow esa semana ÷ matrícula Emoflow de la ciudad. Última semana completa (la semana en curso se excluye por estar empezando). Directo del CSV de Emoflow."
+                  nota={
+                    'Personas distintas que entraron a Emoflow esa semana ÷ matrícula Emoflow de la ciudad. Última semana completa (la semana en curso se excluye por estar empezando). Directo del CSV de Emoflow.' +
+                    (estado === 'retirados' ? ' Esta serie no tiene desglose por Estado — sigue mostrando el histórico completo, no solo retirados.' : '')
+                  }
                 >
                   <GraficoBarras
                     datos={actividadSemanalUltima.datos}
@@ -2186,7 +2217,10 @@ export default function Pagina() {
               {!ciudadElegida && actividadSemanalEvolucion.length > 0 && (
                 <Seccion
                   titulo="Evolución semanal de la actividad en Emoflow"
-                  nota="% de la matrícula Emoflow activa por semana, por ciudad. Una marca por semana completa (eje X = lunes de cada semana). La semana en curso se muestra solo cuando termina, para no comparar días sueltos contra semanas completas. Directo del CSV de Emoflow."
+                  nota={
+                    '% de la matrícula Emoflow activa por semana, por ciudad. Una marca por semana completa (eje X = lunes de cada semana). La semana en curso se muestra solo cuando termina, para no comparar días sueltos contra semanas completas. Directo del CSV de Emoflow.' +
+                    (estado === 'retirados' ? ' Esta serie no tiene desglose por Estado — sigue mostrando el histórico completo, no solo retirados.' : '')
+                  }
                 >
                   <GraficoHistorial
                     historial={actividadSemanalEvolucion}
