@@ -477,9 +477,16 @@ export interface PubSeguimiento {
 // esperada (~89%), no un error — mostrarlo siempre al lado de con_q10=true, nunca solo.
 // leerSeguro porque, como retencionCiudad/impactoFinancieroMr, la vista puede no existir
 // aún si el frontend se despliega antes de aplicar la migración.
+// Fix 2026-08-27 (bug real en producción, ver migración 057): la versión original agrupaba
+// por (anio_registro x ciudad_norm x con_q10) — con 561 ciudades, cientos de celdas <5 se
+// suprimían y sumar `total` (tratando NULL como 0) perdía 1.213 personas (24%) del KPI
+// titular. `ambito` distingue 'nacional' (SIN ciudad_norm, casi sin supresión — usar SIEMPRE
+// esto para el KPI titular, mismo patrón que PubSeguimiento) de 'ciudad' (con ciudad_norm,
+// para filtrar una ciudad específica — ahí sí es esperable algo de supresión).
 export interface PubMrUniverso {
+  ambito: 'nacional' | 'ciudad';
   anio_registro: string; // año de fecha_creacion (postulantes_mr), o 'sin dato'
-  ciudad_norm: string;
+  ciudad_norm: string | null; // null cuando ambito='nacional'
   con_q10: boolean;
   total: number | null; // null = supresión k-anonimato (n<5)
 }

@@ -457,13 +457,19 @@ export default function Pagina() {
   // 2026-08-26 "no discriminar por Q10"). A diferencia del resto de este tab, NO se filtra
   // por cohorte/estado — MR no se organiza por cohortes de selección anual como JC (ver
   // docs/procesos/plan-seguimiento-mr-2026-08-25.md §1), solo por ciudad si hay una elegida.
-  // Sumar `total` con supresión n<5 subcuenta un poco frente al real sin desglosar — mismo
-  // trade-off ya aceptado en impactoFinancieroMrFiltrada arriba.
+  //
+  // FIX 2026-08-27 (bug real detectado por Samuel en producción): sin ciudad elegida hay que
+  // usar SIEMPRE ambito='nacional' (agrupado sin ciudad_norm, casi sin supresión) — la versión
+  // con ciudad_norm suprimía cientos de celdas <5 en las 561 ciudades y sumar sus `total`
+  // perdía 1.213 personas (24%) del KPI titular (mostraba 3.898 en vez de 5.111). Mismo patrón
+  // ya usado por PubSeguimiento ("para el KPI de contraste usar SIEMPRE ambito='nacional'").
+  // Con ciudad elegida sí se usa ambito='ciudad' — ahí la supresión es esperable, es detalle
+  // geográfico, no el titular.
   const mrUniversoResumen = useMemo(() => {
     if (!datos || programa !== 'mr') return null;
     const filas = ciudadElegida
-      ? datos.mrUniverso.filter((d) => d.ciudad_norm === ciudadElegida)
-      : datos.mrUniverso;
+      ? datos.mrUniverso.filter((d) => d.ambito === 'ciudad' && d.ciudad_norm === ciudadElegida)
+      : datos.mrUniverso.filter((d) => d.ambito === 'nacional');
     const sumar = (pred: (d: PubMrUniverso) => boolean) =>
       filas.filter(pred).reduce((acc, d) => acc + (d.total ?? 0), 0);
     return {
