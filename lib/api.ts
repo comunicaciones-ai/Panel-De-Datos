@@ -61,6 +61,17 @@ async function leerPaginado<T>(recurso: string, paso = 1000): Promise<T[]> {
   return out;
 }
 
+// leerPaginado() + nunca rompe el panel (mismo motivo que leerSeguro). Usar para cualquier
+// vista nueva que pueda pasar de 1000 filas Y cuyo despliegue de datos pueda ir por detrás
+// del despliegue del frontend.
+async function leerSeguroPaginado<T>(recurso: string, paso = 1000): Promise<T[]> {
+  try {
+    return await leerPaginado<T>(recurso, paso);
+  } catch {
+    return [];
+  }
+}
+
 export interface CohorteStats {
   cohorte: string;
   programa: 'jc' | 'mr' | 'stand';
@@ -665,7 +676,12 @@ export async function cargarTodo(): Promise<Datos> {
       leer<CohorteIngresos>('v_pub_cohorte'),
       leerSeguro<RetencionCiudad>('v_pub_retencion_ciudad'),
       leerSeguro<PubImpactoFinancieroMr>('v_pub_impacto_financiero_mr'),
-      leerSeguro<PubMrUniverso>('v_pub_mr_universo'),
+      // BUG REAL 2026-08-27: v_pub_mr_universo tiene 1.003 filas (992 ambito=ciudad + 11
+      // ambito=nacional, la vista existe para poder filtrar por ciudad específica); con
+      // leer() simple, PostgREST corta en 1000 y — como 'ciudad' < 'nacional' alfabéticamente
+      // en el ORDER BY de la vista — se perdían 3 de las 11 filas 'nacional' (2023 sin Q10 y
+      // todo 2022), bajando el KPI titular de 5.111 a 1.940. leerSeguroPaginado trae TODO.
+      leerSeguroPaginado<PubMrUniverso>('v_pub_mr_universo'),
       leerSeguro<AprobacionCursoCiudad>('v_pub_aprobacion_ciudad_jc?order=cursaron.desc'),
       leerSeguro<PubMrDemografiaUniverso>('v_pub_mr_demografia_universo'),
       leerSeguro<PubMrFormacionUniverso>('v_pub_mr_formacion_universo'),
