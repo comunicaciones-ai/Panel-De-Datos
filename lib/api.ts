@@ -508,15 +508,19 @@ export interface PubMrUniverso {
   total: number | null; // null = supresión k-anonimato (n<5)
 }
 
-// v_pub_mr_demografia_universo (migración 056, 2026-08-27): demografía del universo COMPLETO
-// de Mujeres ROFÉ (postulantes_mr, fuente_pestana='general' -- 5.111), NO Q10-gated -- a
-// diferencia de v_mr_demografia/v_pub_impacto_financiero_mr, que solo ven a quien matriculó.
-// Mismo formato largo que PubDemografia. Comparado contra el Power BI externo
+// v_pub_mr_demografia_universo (migración 056, 2026-08-27; +anio_registro en 059): demografía
+// del universo COMPLETO de Mujeres ROFÉ (postulantes_mr, fuente_pestana='general' -- 5.111),
+// NO Q10-gated -- a diferencia de v_mr_demografia/v_pub_impacto_financiero_mr, que solo ven a
+// quien matriculó. Mismo formato largo que PubDemografia. Comparado contra el Power BI externo
 // tocaunavida.org/reportes-mr (2026-08-26/27). dimension ∈ tipo_vivienda | estrato |
 // nivel_estudio | estado_civil | edad_rango | ingresos_familiares | tipo_credito (categoria
-// 'microcredito'|'icredit'). Sin filtro de cohorte/estado/ciudad -- ver v_pub_mr_universo para
-// ciudad. leerSeguro por si el frontend se despliega antes que la vista.
+// 'microcredito'|'icredit'). Filtrable por AÑO (anio_registro, misma derivación que
+// v_pub_mr_universo) -- a propósito SIN ciudad: cruzar año x ciudad x 7 dimensiones perdía
+// 32.4% de las personas a supresión k-anonimato (medido 2026-08-27), inaceptable (ver 059). El
+// filtro de ciudad del panel solo aplica al KPI (v_pub_mr_universo), nunca aquí. leerSeguro por
+// si el frontend se despliega antes que la vista.
 export interface PubMrDemografiaUniverso {
+  anio_registro: string;
   dimension: string;
   categoria: string;
   total: number | null;

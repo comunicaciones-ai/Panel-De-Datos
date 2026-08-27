@@ -317,10 +317,20 @@ export default function Pagina() {
   // ser lo primero que se ve. Solo aplica a MR — JC sigue siendo Q10 siempre (no tiene el
   // concepto de "universo sin Q10").
   const [mostrarQ10Mr, setMostrarQ10Mr] = useState(false);
-  // Año elegido dentro de "Histórico Q10 (2022-2026)" — foto estática, arranca en el año más
-  // reciente (2026). Toggle del bloque de créditos: total beneficiadas vs las que continúan
-  // (cumplieron/pagaron) — pedido 2026-08-27.
-  const [anioHistoricoMr, setAnioHistoricoMr] = useState('2026');
+  // Año elegido para TODA la vista "Universo histórico" MR (KPI + Demografía + Formación) —
+  // pedido 2026-08-27: un solo selector de año, fijo en un mini-header, que mueve las tres
+  // vistas a la vez ("reuse year-tab mechanism already built for Histórico Q10"). 'todos' =
+  // comportamiento original (todos los años juntos); Demografía/KPI lo soportan nativo (solo
+  // suman/filtran), Formación (tabla por curso) necesita un año puntual porque los cursos
+  // cambian de nombre cada año — con 'todos' se avisa en vez de inventar un promedio sin
+  // sentido (ver VistaUniversoMr). Toggle del bloque de créditos: total beneficiadas vs las
+  // que continúan (cumplieron/pagaron) — pedido 2026-08-27.
+  const [anioUniversoMr, setAnioUniversoMr] = useState('todos');
+  // Marco de referencia de "Formación" (pedido 2026-08-27): con qué base se calcula el % de
+  // completitud por curso — 'inscritas' (todas las que se inscribieron, aunque nunca hayan
+  // entrado a la plataforma) o 'iniciados' (solo las que sí llegaron a Bienvenida). Cambia el
+  // denominador del % en la tabla y el texto del KPI, no los números crudos.
+  const [marcoFormacionMr, setMarcoFormacionMr] = useState<'inscritas' | 'iniciados'>('inscritas');
   const [vistaCreditoMr, setVistaCreditoMr] = useState<'beneficiadas' | 'continuan'>('beneficiadas');
   // Unidad del desglose "Estado de la cohorte": matrículas (inscripciones) o estudiantes (personas).
   // Solo tiene sentido bajo Estado=Activos (v_cohorte_estudiantes* no distingue retirados).
@@ -571,6 +581,46 @@ export default function Pagina() {
       hayDatos: filas.length > 0,
     };
   }, [datos, programa, ciudadElegida]);
+
+  // Mismo cálculo que mrUniversoResumen, pero AdemÁs filtrado por anioUniversoMr — solo para
+  // VistaUniversoMr (pedido 2026-08-27: año+ciudad en todas las vistas del universo histórico).
+  // Se deja mrUniversoResumen intacto (ciudad-only) porque también lo usa el tab "Resumen" de
+  // abajo, detrás del toggle "🎓 Datos Q10", donde el mini-header de año no existe/no se ve.
+  const mrUniversoResumenFiltrado = useMemo(() => {
+    if (!datos || programa !== 'mr') return null;
+    const base = ciudadElegida
+      ? datos.mrUniverso.filter((d) => d.ambito === 'ciudad' && d.ciudad_norm === ciudadElegida)
+      : datos.mrUniverso.filter((d) => d.ambito === 'nacional');
+    const filas = anioUniversoMr === 'todos' ? base : base.filter((d) => d.anio_registro === anioUniversoMr);
+    const sumar = (pred: (d: PubMrUniverso) => boolean) =>
+      filas.filter(pred).reduce((acc, d) => acc + (d.total ?? 0), 0);
+    return {
+      total: sumar(() => true),
+      conQ10: sumar((d) => d.con_q10 === true),
+      sinQ10: sumar((d) => d.con_q10 === false),
+      sinDatoQ10: sumar((d) => d.con_q10 === null),
+      hayDatos: filas.length > 0,
+    };
+  }, [datos, programa, ciudadElegida, anioUniversoMr]);
+
+  // Ciudades del universo MR (v_pub_mr_universo, ambito='ciudad'), respetando el año elegido —
+  // fuente correcta para el selector de ciudad de VistaUniversoMr (gruposGeografia de abajo es
+  // Q10/cohorte-scoped vía v_pub_geografia, no sirve para el universo completo). Mismo umbral
+  // "ciudad grande" que ya usa panel_control_gui.py localmente (≥50) — el resto se agrupa en
+  // "Otras ciudades" en vez de listar 500+ botones.
+  const ciudadesUniversoMr = useMemo(() => {
+    if (!datos) return [];
+    const filas = datos.mrUniverso.filter(
+      (d) => d.ambito === 'ciudad' && (anioUniversoMr === 'todos' || d.anio_registro === anioUniversoMr),
+    );
+    const totales = new Map<string, number>();
+    filas.forEach((d) => {
+      if (d.ciudad_norm && d.total != null) totales.set(d.ciudad_norm, (totales.get(d.ciudad_norm) ?? 0) + d.total);
+    });
+    return Array.from(totales.entries())
+      .filter(([, total]) => total >= 50)
+      .sort((a, b) => b[1] - a[1]);
+  }, [datos, anioUniversoMr]);
 
   const pubAsistenciaFiltrada = useMemo(() => {
     if (!datos) return [];
@@ -1160,9 +1210,15 @@ export default function Pagina() {
     tipo_credito: 'Acceso a crédito (Microcrédito / iCredit)',
   };
   function TarjetaDemografiaUniverso({ dimension }: { dimension: (typeof DIMENSIONES_UNIVERSO_MR)[number] }) {
+    // Filtro de año (migración 059, pedido 2026-08-27) — 'todos' suma como antes, un año
+    // puntual filtra primero. A PROPÓSITO sin filtro de ciudad: cruzar año x ciudad x estas 7
+    // dimensiones perdía 32.4% de personas a supresión k-anonimato (medido, ver 059) — si hay
+    // una ciudad elegida en el header se avisa (NotaFiltros) en vez de aplicarla en silencio.
     const mapa = new Map<string, number>();
     for (const f of datos?.mrDemografiaUniverso ?? []) {
-      if (f.dimension === dimension && f.total != null) mapa.set(f.categoria, (mapa.get(f.categoria) ?? 0) + f.total);
+      if (f.dimension !== dimension || f.total == null) continue;
+      if (anioUniversoMr !== 'todos' && f.anio_registro !== anioUniversoMr) continue;
+      mapa.set(f.categoria, (mapa.get(f.categoria) ?? 0) + f.total);
     }
     if (mapa.size === 0) {
       return (
@@ -1204,131 +1260,177 @@ export default function Pagina() {
   // de los tabs Resumen/Demografía (se deja igual ahí, sin tocar, para cuando el toggle está
   // en "Datos Q10" y se navega por tabs) — acá se repite standalone para que sea lo primero
   // que se ve, sin tabs, sin depender de cohorte/estado.
+  // Mini-header fijo (sticky) con los selectores de Año y Ciudad — pedido 2026-08-27: que
+  // quede a la vista mientras se hace scroll por KPI/Demografía/Formación, en vez de perderse
+  // arriba de la página. Año mueve las tres vistas; Ciudad SOLO mueve el KPI (ver nota abajo
+  // del header y comentario en TarjetaDemografiaUniverso/Formación sobre por qué).
+  function BarraUniversoMr() {
+    const pill = (activo: boolean) =>
+      `px-3 py-1.5 rounded-lg text-xs font-bold transition-colors whitespace-nowrap ${
+        activo ? 'pill-metal pill-metal-rosa' : 'text-slate-600 hover:bg-slate-100'
+      }`;
+    return (
+      <div className="sticky top-2 z-30 mb-5">
+        <div className="tarjeta-glass p-2 shadow-lg backdrop-blur-md flex flex-wrap items-center gap-x-4 gap-y-2">
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="text-[11px] font-bold text-slate-500 pl-1 pr-0.5">Año:</span>
+            <button onClick={() => setAnioUniversoMr('todos')} className={pill(anioUniversoMr === 'todos')}>Todos</button>
+            {HISTORICO_Q10_MR.map((a) => (
+              <button key={a.anio} onClick={() => setAnioUniversoMr(a.anio)} className={pill(anioUniversoMr === a.anio)}>
+                {a.anio}
+              </button>
+            ))}
+          </div>
+          {ciudadesUniversoMr.length > 0 && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <span className="text-[11px] font-bold text-slate-500 pl-1 pr-0.5">Ciudad:</span>
+              <button onClick={() => setCiudadElegida(null)} className={pill(ciudadElegida === null)}>Todas</button>
+              {ciudadesUniversoMr.slice(0, 12).map(([ciudad, total]) => (
+                <button key={ciudad} onClick={() => setCiudadElegida(ciudad)} className={pill(ciudadElegida === ciudad)}>
+                  {ETIQUETA_GRUPO[ciudad] ?? ciudad} · {total.toLocaleString('es-CO')}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <p className="text-[11px] text-slate-400 mt-1 px-1">
+          Ciudad solo filtra el KPI de arriba — Demografía y Formación se quedan a nivel nacional (cruzar por ciudad ahí perdería ~32% de las mujeres a supresión de privacidad, grupos muy chicos).
+        </p>
+      </div>
+    );
+  }
+
   function VistaUniversoMr() {
     return (
       <>
-        {mrUniversoResumen && (
+        <BarraUniversoMr />
+        {mrUniversoResumenFiltrado && (
           <Seccion
             titulo="Universo de Mujeres ROFÉ (con y sin Q10)"
             nota={
               (ciudadElegida
-                ? `Solo ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}. Incluye TODAS las mujeres registradas en la base (postulantes y matriculadas), no solo las que tienen curso en Q10 — por eso "Sin Q10" suele ser la mayoría, no un error.`
-                : 'Incluye TODAS las mujeres registradas en la base (postulantes y matriculadas), no solo las que tienen curso en Q10 — por eso "Sin Q10" suele ser la mayoría, no un error.'
-              ) + ' Esta caja solo filtra por Ciudad — es el universo completo histórico, sin cohorte ni Q10.'
+                ? `Solo ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}`
+                : 'Todas las ciudades'
+              ) +
+              (anioUniversoMr === 'todos' ? ', todos los años' : `, año ${anioUniversoMr}`) +
+              '. Incluye TODAS las mujeres registradas en la base (postulantes y matriculadas), no solo las que tienen curso en Q10 — por eso "Sin Q10" suele ser la mayoría, no un error.'
             }
           >
-            {mrUniversoResumen.hayDatos ? (
+            {mrUniversoResumenFiltrado.hayDatos ? (
               <>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  <Kpi titulo="Universo total" valor={mrUniversoResumen.total.toLocaleString('es-CO')} detalle="Con y sin matrícula Q10" />
-                  <Kpi titulo="Con Q10" valor={mrUniversoResumen.conQ10.toLocaleString('es-CO')} detalle="Matricularon en un curso" acento={C.verde} />
-                  <Kpi titulo="Sin Q10" valor={mrUniversoResumen.sinQ10.toLocaleString('es-CO')} detalle="Solo candidatas/postulantes, aún cuentan" acento={C.naranja} />
+                  <Kpi titulo="Universo total" valor={mrUniversoResumenFiltrado.total.toLocaleString('es-CO')} detalle="Con y sin matrícula Q10" />
+                  <Kpi titulo="Con Q10" valor={mrUniversoResumenFiltrado.conQ10.toLocaleString('es-CO')} detalle="Matricularon en un curso" acento={C.verde} />
+                  <Kpi titulo="Sin Q10" valor={mrUniversoResumenFiltrado.sinQ10.toLocaleString('es-CO')} detalle="Solo candidatas/postulantes, aún cuentan" acento={C.naranja} />
                 </div>
-                {mrUniversoResumen.sinDatoQ10 > 0 && (
+                {mrUniversoResumenFiltrado.sinDatoQ10 > 0 && (
                   <p className="text-xs text-slate-400 mt-3">
-                    +{mrUniversoResumen.sinDatoQ10.toLocaleString('es-CO')} más sin fecha de registro identificable — cuentan en el total, pero no se muestra si tienen Q10 o no (grupo muy chico para desglosar sin arriesgar privacidad).
+                    +{mrUniversoResumenFiltrado.sinDatoQ10.toLocaleString('es-CO')} más sin fecha de registro identificable — cuentan en el total, pero no se muestra si tienen Q10 o no (grupo muy chico para desglosar sin arriesgar privacidad).
                   </p>
                 )}
               </>
             ) : (
-              <EnConstruccion detalle="Esta vista requiere v_pub_mr_universo (migración 054), propuesta pero aún no aplicada en la base de datos." />
+              <NoAplica motivo="no hay mujeres registradas para este año/ciudad." suave />
             )}
           </Seccion>
         )}
+        <NotaFiltros inaplicables={ciudadElegida ? ['Ciudad (Demografía y Formación quedan a nivel nacional, ver header)'] : []} />
         <div className="grid md:grid-cols-2 gap-6 my-6">
           {DIMENSIONES_UNIVERSO_MR.map((dim) => (
             <TarjetaDemografiaUniverso key={dim} dimension={dim} />
           ))}
         </div>
+
+        {/* Formación — cursos MR por año, ESTÁTICO (2026-08-27, ver HISTORICO_Q10_MR arriba).
+            Rediseño del mismo día: reemplaza el histograma en vivo 0/1/2/3+ (que salía de
+            enrollments/v_pub_mr_formacion_universo, con huecos reales pre-2027, ver ADR) por
+            el detalle real por curso del informe oficial -- inscritas/iniciados/completados --
+            ya usado en la sección "Histórico Q10 por año" (fusionada acá, no se duplica más).
+            "Nunca llegaron a Bienvenida" es la población real de "0 cursos" pedida por Samuel:
+            se acerca con bd - Σiniciados, marcado explícitamente como aproximación (piso, no
+            exacto) porque "iniciados" es a nivel de inscripción-curso, no de persona única. */}
         {(() => {
-          const filasForm = (datos?.mrFormacionUniverso ?? []).filter((f) => f.total != null) as
-            { cursos_completados: string; total: number }[];
-          if (filasForm.length === 0) {
-            return (
-              <Seccion titulo="Formación (cursos completados)">
-                <NoAplica motivo="sin datos suficientes (o vista aún no aplicada)." suave />
-              </Seccion>
-            );
-          }
-          const total = filasForm.reduce((s, f) => s + f.total, 0);
-          const sinCursos = filasForm.find((f) => f.cursos_completados === '0')?.total ?? 0;
-          const pctSinCursos = total ? Math.round((1000 * sinCursos) / total) / 10 : 0;
-          const filasBarra = filasForm
-            .map((f) => ({ etiqueta: f.cursos_completados, total: f.total }))
-            .sort((a, b) => (a.etiqueta === '5+' ? 1 : b.etiqueta === '5+' ? -1 : Number(a.etiqueta) - Number(b.etiqueta)));
+          const sumIniciados = (cursos: CursoHistoricoMr[]) =>
+            cursos.reduce((s, c) => s + (c.iniciados ?? 0), 0);
+          const anioSel = anioUniversoMr === 'todos' ? null : HISTORICO_Q10_MR.find((a) => a.anio === anioUniversoMr) ?? null;
+          const bd = anioSel ? anioSel.bd : HISTORICO_Q10_MR.reduce((s, a) => s + a.bd, 0);
+          const iniciadosTotales = anioSel
+            ? sumIniciados(anioSel.cursos)
+            : HISTORICO_Q10_MR.reduce((s, a) => s + sumIniciados(a.cursos), 0);
+          const nuncaBienvenida = Math.max(0, bd - iniciadosTotales);
+          const pctNuncaBienvenida = bd ? Math.round((1000 * nuncaBienvenida) / bd) / 10 : 0;
           return (
             <Seccion
-              titulo="Formación — cursos MR completados"
-              nota="De las 5.111, cuántas completaron 0, 1, 2... cursos en Q10, sumando todos los años juntos (no separado por cohorte)."
+              titulo="Formación — cursos MR por año (foto fija, no en vivo)"
+              nota={
+                'Dato oficial hasta 2026 (informe Excel de Samuel) — desde 2027 el seguimiento Q10 pasa a ser completo y auditado en vivo, ver ADR. ' +
+                (marcoFormacionMr === 'inscritas'
+                  ? '% de la tabla = completaron ÷ se inscribieron (incluye a quien nunca entró a la plataforma).'
+                  : '% de la tabla = completaron ÷ SÍ llegaron a Bienvenida (excluye a quien nunca entró).')
+              }
             >
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
-                <Kpi titulo="Mujeres con este dato" valor={total.toLocaleString('es-CO')} detalle="universo completo" />
-                <Kpi titulo="Sin ningún curso completado" valor={sinCursos.toLocaleString('es-CO')} detalle={`${pctSinCursos}% del universo`} acento={C.naranja} />
-                <Kpi titulo="Con al menos 1 curso" valor={(total - sinCursos).toLocaleString('es-CO')} detalle={`${(100 - pctSinCursos).toFixed(1)}% del universo`} acento={C.verde} />
+              <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4 flex-wrap">
+                {([['inscritas', 'Se inscribió y completó'], ['iniciados', 'Ingresó a Q10 y completó']] as const).map(([v, txt]) => (
+                  <button
+                    key={v}
+                    onClick={() => setMarcoFormacionMr(v)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                      marcoFormacionMr === v ? 'pill-metal pill-metal-rosa' : 'text-slate-600 hover:bg-slate-100'
+                    }`}
+                  >
+                    {txt}
+                  </button>
+                ))}
               </div>
-              <GraficoBarras datos={filasBarra} dataKey="total" nombre="Mujeres" color={C.azul2} etiquetaKey="etiqueta" />
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-3">
+                <Kpi titulo={anioSel ? `BD total ${anioSel.anio}` : 'BD total (2022-2026)'} valor={bd.toLocaleString('es-CO')} detalle="Registradas ese período" />
+                <Kpi titulo="Nunca llegaron a Bienvenida" valor={nuncaBienvenida.toLocaleString('es-CO')} detalle={`~${pctNuncaBienvenida}% · 0 cursos real, aprox.`} acento={C.naranja} />
+                <Kpi titulo="Sí entraron a la plataforma" valor={iniciadosTotales.toLocaleString('es-CO')} detalle={`~${(100 - pctNuncaBienvenida).toFixed(1)}%, aprox.`} acento={C.verde} />
+              </div>
+              <p className="text-[11px] text-slate-400 mb-4">
+                Aproximado: "iniciados" es a nivel de inscripción por curso (si una mujer empezó 2 cursos, resta 2 veces) — este número es un PISO del real "nunca entraron a nada". No hay dato de persona única antes de 2027.
+              </p>
+              {!anioSel ? (
+                <NoAplica motivo='el detalle por curso solo se ve un año a la vez — los cursos cambian de nombre cada año. Elige un año en el header de arriba.' suave />
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b border-slate-200">
+                        <th className="py-2 pr-4">Curso</th>
+                        <th className="py-2 pr-4 text-right">Inscritas</th>
+                        <th className="py-2 pr-4 text-right">Sin iniciar</th>
+                        <th className="py-2 text-right">Completaron</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {anioSel.cursos.map((curso) => {
+                        const sinIniciar = curso.inscritas != null && curso.iniciados != null ? curso.inscritas - curso.iniciados : null;
+                        const denom = marcoFormacionMr === 'inscritas' ? curso.inscritas : curso.iniciados;
+                        const pct = denom && curso.completados != null ? Math.round((100 * curso.completados) / denom) : null;
+                        return (
+                          <tr key={curso.nombre} className="border-b border-slate-100">
+                            <td className="py-2 pr-4">{curso.nombre}</td>
+                            <td className="py-2 pr-4 text-right">{curso.inscritas?.toLocaleString('es-CO') ?? '—'}</td>
+                            <td className="py-2 pr-4 text-right" style={{ color: sinIniciar ? C.naranja : undefined }}>
+                              {sinIniciar != null ? sinIniciar.toLocaleString('es-CO') : '—'}
+                            </td>
+                            <td className="py-2 text-right font-semibold" style={{ color: C.verde }}>
+                              {curso.completados != null ? `${curso.completados.toLocaleString('es-CO')}${pct != null ? ` (${pct}%)` : ''}` : 'Sin datos aún'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  <p className="text-xs text-slate-400 mt-2">
+                    "Sin iniciar" y el % son por curso — si una mujer se inscribió en varios cursos ese año, puede contar más de una vez (a nivel de matrícula, no de persona única).
+                  </p>
+                </div>
+              )}
             </Seccion>
           );
         })()}
-
-        {/* Histórico Q10 por año — ESTÁTICO (2026-08-27, ver HISTORICO_Q10_MR arriba). ADR
-            del mismo día: seguimiento Q10 completo y auditado arranca en 2027; 2022-2026
-            quedan congelados como foto fija del informe oficial, no se recalculan con
-            Supabase (que además tiene huecos reales para esos años). */}
-        <Seccion
-          titulo="Histórico Q10 por año (2022-2026) — foto fija, no en vivo"
-          nota={
-            `BD total ${anioHistoricoMr}: ${(HISTORICO_Q10_MR.find((a) => a.anio === anioHistoricoMr)?.bd ?? 0).toLocaleString('es-CO')}. ` +
-            '"Inscritas" = veces inscritas al curso (se pueden reinscribir varias veces, no es headcount único). "Sin iniciar" = se inscribió pero nunca entró a la plataforma Q10 (nunca llegó a Bienvenida). Dato oficial hasta 2026 — desde 2027 el seguimiento Q10 pasa a ser completo y auditado en vivo.'
-          }
-        >
-          <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4 flex-wrap">
-            {HISTORICO_Q10_MR.map((a) => (
-              <button
-                key={a.anio}
-                onClick={() => setAnioHistoricoMr(a.anio)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
-                  anioHistoricoMr === a.anio ? 'pill-metal pill-metal-rosa' : 'text-slate-600 hover:bg-slate-100'
-                }`}
-              >
-                {a.anio}
-              </button>
-            ))}
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-slate-500 border-b border-slate-200">
-                  <th className="py-2 pr-4">Curso</th>
-                  <th className="py-2 pr-4 text-right">Inscritas</th>
-                  <th className="py-2 pr-4 text-right">Sin iniciar</th>
-                  <th className="py-2 text-right">Completaron</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(HISTORICO_Q10_MR.find((a) => a.anio === anioHistoricoMr)?.cursos ?? []).map((curso) => {
-                  const sinIniciar = curso.inscritas != null && curso.iniciados != null ? curso.inscritas - curso.iniciados : null;
-                  const pct = curso.iniciados && curso.completados != null ? Math.round((100 * curso.completados) / curso.iniciados) : null;
-                  return (
-                    <tr key={curso.nombre} className="border-b border-slate-100">
-                      <td className="py-2 pr-4">{curso.nombre}</td>
-                      <td className="py-2 pr-4 text-right">{curso.inscritas?.toLocaleString('es-CO') ?? '—'}</td>
-                      <td className="py-2 pr-4 text-right" style={{ color: sinIniciar ? C.naranja : undefined }}>
-                        {sinIniciar != null ? sinIniciar.toLocaleString('es-CO') : '—'}
-                      </td>
-                      <td className="py-2 text-right font-semibold" style={{ color: C.verde }}>
-                        {curso.completados != null ? `${curso.completados.toLocaleString('es-CO')}${pct != null ? ` (${pct}%)` : ''}` : 'Sin datos aún'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-xs text-slate-400 mt-2">
-            "Sin iniciar" suma por curso — si una mujer se inscribió en varios cursos del mismo año, puede contar más de una vez (mismo criterio que "Inscritas": es a nivel de matrícula, no de persona única).
-          </p>
-        </Seccion>
 
         {/* Créditos — desembolso real, ESTÁTICO (2026-08-27, ver CREDITO_HISTORICO_MR
             arriba). Cifras del equipo financiero, distintas de "Acceso a crédito" del tab
