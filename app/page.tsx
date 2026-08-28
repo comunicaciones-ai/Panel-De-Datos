@@ -973,6 +973,20 @@ export default function Pagina() {
     [datos, cohorte, programa],
   );
 
+  // Denominador correcto para el punto gris "sin dato" de TarjetaDemografia (pedido 2026-08-28,
+  // Samuel: "revisa que las otras vistas también cuadren" tras el fix de MR). Auditoría real
+  // encontró que JC 2026 activos (canon 743) vs v_pub_demografia solo suma 524 en estrato/nivel_
+  // estudio/tipo_vivienda -- ~30% de la cohorte sin ese dato, nunca mostrado. ingresosProg ya
+  // trae ingresados/activos/retirados exactos (canon v_pub_cohorte) -- se elige el que calce con
+  // el filtro Estado vigente. NULL con ciudad elegida a propósito: no hay canon por ciudad
+  // confiable para "activos de esta ciudad" (mismo motivo que MR no cruza Demografía x ciudad).
+  const demografiaTotalEsperado = useMemo(() => {
+    if (!ingresosProg || ciudadElegida) return null;
+    if (estado === 'activos') return ingresosProg.activos ?? null;
+    if (estado === 'retirados') return ingresosProg.retirados ?? null;
+    return ingresosProg.ingresados ?? null;
+  }, [ingresosProg, estado, ciudadElegida]);
+
   // Segmentos del gráfico de aprobación por curso, recortados al Estado elegido: Activos
   // (aprobó/en curso, denominador=activos), Retirados (aprobó-y-retiró/retirado,
   // denominador=retirados) o Todos (los 4 segmentos, como antes — denominador=cursaron).
@@ -1253,6 +1267,12 @@ export default function Pagina() {
       );
     }
 
+    // "sin dato" real (auditoría 2026-08-28): comparado contra el canon de la cohorte
+    // (demografiaTotalEsperado, ver definición) — null con ciudad elegida, ese caso no se
+    // marca (sin canon confiable por ciudad, mismo criterio que MR).
+    const sumaDimension = Array.from(mapa.values()).reduce((a, b) => a + b, 0);
+    const sinDato = demografiaTotalEsperado != null ? Math.max(0, demografiaTotalEsperado - sumaDimension) : 0;
+
     if (dimension === 'genero') {
       const filas = Array.from(mapa.entries()).map(([categoria, total]) => ({
         nombre: categoria,
@@ -1261,6 +1281,7 @@ export default function Pagina() {
       }));
       return (
         <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
+          <PuntoSinDato cantidad={sinDato} />
           <GraficoEmprendimiento datos={filas} />
         </Seccion>
       );
@@ -1273,6 +1294,7 @@ export default function Pagina() {
       }));
       return (
         <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
+          <PuntoSinDato cantidad={sinDato} />
           <GraficoEmprendimiento datos={filas} />
         </Seccion>
       );
@@ -1287,6 +1309,7 @@ export default function Pagina() {
     if (orden) filas.sort((a, b) => orden.indexOf(a.orden) - orden.indexOf(b.orden));
     return (
       <Seccion titulo={ETIQUETA_DIMENSION[dimension]} nota={dimension === 'edad_rango' ? 'En rangos — nunca edades individuales.' : undefined}>
+        <PuntoSinDato cantidad={sinDato} />
         <GraficoBarras datos={filas} dataKey="total" nombre="Personas" color={C.azul2} />
       </Seccion>
     );
