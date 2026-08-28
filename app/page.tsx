@@ -247,12 +247,12 @@ function EmbudoFormacionMr(
 // aparecía en ningún lado, dejando la resta en silencio. Nunca ocultar esto (regla del
 // rediseño §2.3, mismo espíritu que NoAplica/NotaFiltros): mejor un punto gris chiquito que
 // una cifra que no cuadra sin explicación.
-function PuntoSinDato({ cantidad }: { cantidad: number }) {
+function PuntoSinDato({ cantidad, texto, className }: { cantidad: number; texto?: string; className?: string }) {
   if (cantidad <= 0) return null;
   return (
-    <p className="text-[11px] text-slate-400 mb-2 flex items-center gap-1.5">
+    <p className={`text-[11px] text-slate-400 flex items-center gap-1.5 ${className ?? 'mb-2'}`}>
       <span className="inline-block w-2 h-2 rounded-full bg-slate-300 shrink-0" />
-      {cantidad.toLocaleString('es-CO')} sin dato (nunca lo llenaron)
+      {texto ?? `${cantidad.toLocaleString('es-CO')} sin dato (nunca lo llenaron)`}
     </p>
   );
 }
@@ -1432,11 +1432,11 @@ export default function Pagina() {
                   <Kpi titulo="Con Q10" valor={mrUniversoResumenFiltrado.conQ10.toLocaleString('es-CO')} detalle="Matricularon en un curso" acento={C.verde} />
                   <Kpi titulo="Sin Q10" valor={mrUniversoResumenFiltrado.sinQ10.toLocaleString('es-CO')} detalle="Solo candidatas/postulantes, aún cuentan" acento={C.naranja} />
                 </div>
-                {mrUniversoResumenFiltrado.sinDatoQ10 > 0 && (
-                  <p className="text-xs text-slate-400 mt-3">
-                    +{mrUniversoResumenFiltrado.sinDatoQ10.toLocaleString('es-CO')} más sin fecha de registro identificable — cuentan en el total, pero no se muestra si tienen Q10 o no (grupo muy chico para desglosar sin arriesgar privacidad).
-                  </p>
-                )}
+                <PuntoSinDato
+                  cantidad={mrUniversoResumenFiltrado.sinDatoQ10}
+                  className="mt-3"
+                  texto={`+${mrUniversoResumenFiltrado.sinDatoQ10.toLocaleString('es-CO')} más sin fecha de registro identificable — cuentan en el total, pero no se muestra si tienen Q10 o no (grupo muy chico para desglosar sin arriesgar privacidad).`}
+                />
               </>
             ) : (
               <NoAplica motivo="no hay mujeres registradas para este año/ciudad." suave />
@@ -1930,11 +1930,11 @@ export default function Pagina() {
                     <Kpi titulo="Con Q10" valor={mrUniversoResumen.conQ10.toLocaleString('es-CO')} detalle="Matricularon en un curso" acento={C.verde} />
                     <Kpi titulo="Sin Q10" valor={mrUniversoResumen.sinQ10.toLocaleString('es-CO')} detalle="Solo candidatas/postulantes, aún cuentan" acento={C.naranja} />
                   </div>
-                  {mrUniversoResumen.sinDatoQ10 > 0 && (
-                    <p className="text-xs text-slate-400 mt-3">
-                      +{mrUniversoResumen.sinDatoQ10.toLocaleString('es-CO')} más sin fecha de registro identificable — cuentan en el total, pero no se muestra si tienen Q10 o no (grupo muy chico para desglosar sin arriesgar privacidad).
-                    </p>
-                  )}
+                  <PuntoSinDato
+                    cantidad={mrUniversoResumen.sinDatoQ10}
+                    className="mt-3"
+                    texto={`+${mrUniversoResumen.sinDatoQ10.toLocaleString('es-CO')} más sin fecha de registro identificable — cuentan en el total, pero no se muestra si tienen Q10 o no (grupo muy chico para desglosar sin arriesgar privacidad).`}
+                  />
                 </>
               ) : (
                 <EnConstruccion detalle="Esta vista requiere v_pub_mr_universo (migración 054), propuesta pero aún no aplicada en la base de datos." />
