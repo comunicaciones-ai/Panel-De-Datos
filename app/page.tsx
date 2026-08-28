@@ -658,6 +658,22 @@ export default function Pagina() {
     };
   }, [datos, programa, ciudadElegida, anioUniversoMr]);
 
+  // ÚNICA fuente de verdad del "Universo total" MR en vivo — TODOS los años, SIN filtro de
+  // ciudad ni año (ambito='nacional' completo). Bug real 2026-08-28: el KPI de arriba usaba
+  // esto, pero "Formación" y el tab Demografía (Q10) tenían el número REPETIDO A MANO en texto
+  // ("5.111", luego "BD 5.109" estático) — cuando la base cambiaba (gente que sale del Sheet,
+  // ver postulantes-mr-supabase.md) esos textos quedaban desfasados mientras el KPI sí se
+  // actualizaba, mostrando dos cifras distintas para "lo mismo" en la misma página. Regla desde
+  // hoy: CUALQUIER lugar del panel que diga "el universo total de MR es X" debe leer este
+  // memo (o mrUniversoResumen/mrUniversoResumenFiltrado, que ya lo usan) — nunca escribir el
+  // número a mano en una nota/título, ni siquiera como "actualizado a tal fecha".
+  const universoNacionalTotalMr = useMemo(() => {
+    if (!datos) return 0;
+    return datos.mrUniverso
+      .filter((d) => d.ambito === 'nacional')
+      .reduce((acc, d) => acc + (d.total ?? 0), 0);
+  }, [datos]);
+
   // Ciudades del universo MR (v_pub_mr_universo, ambito='ciudad'), respetando el año elegido —
   // fuente correcta para el selector de ciudad de VistaUniversoMr (gruposGeografia de abajo es
   // Q10/cohorte-scoped vía v_pub_geografia, no sirve para el universo completo). Mismo umbral
@@ -1408,11 +1424,19 @@ export default function Pagina() {
           const suma = (cursos: CursoHistoricoMr[], campo: 'inscritas' | 'iniciados' | 'completados') =>
             cursos.reduce((s, c) => s + (c[campo] ?? 0), 0);
           const anioSel = anioUniversoMr === 'todos' ? null : HISTORICO_Q10_MR.find((a) => a.anio === anioUniversoMr) ?? null;
-          // BD es ACUMULATIVO por año (ver comentario junto a HISTORICO_Q10_MR) -- para
-          // "Todos" el total real es el del año MÁS RECIENTE (2026 → 5.109), NUNCA la suma de
-          // los 5 años (eso lo infla ~3.5x, bug corregido 2026-08-27 mismo día). Inscritos/
-          // iniciados/completados sí se suman entre años -- son actividad de curso, no BD.
-          const bd = anioSel ? anioSel.bd : HISTORICO_Q10_MR[HISTORICO_Q10_MR.length - 1].bd;
+          const anioMasReciente = HISTORICO_Q10_MR[HISTORICO_Q10_MR.length - 1].anio;
+          // BUG REAL 2026-08-28 (encontrado por Samuel: esta caja decía "5.109" mientras el KPI
+          // de arriba, en vivo, ya mostraba 5.100 -- dos cifras distintas para "el total de
+          // Mujeres ROFÉ" en la misma página). Causa: "Todos" y el año más reciente usaban el
+          // `bd` ESTÁTICO de HISTORICO_Q10_MR (congelado el día que se escribió, nunca se
+          // vuelve a tocar por diseño -- ver ADR). Pero para 'Todos' y para el año en curso
+          // (2026), "BD acumulado hasta ese año" y "universo real de hoy" son EXACTAMENTE el
+          // mismo concepto -- no hay motivo para tener dos números. Fix: esos dos casos ahora
+          // leen `universoNacionalTotalMr` (la MISMA fuente que el KPI de arriba, ver su
+          // comentario) -- nunca más pueden divergir porque son literalmente el mismo cálculo.
+          // Los años CERRADOS (2022-2025) sí se quedan con el `bd` estático -- ahí es correcto
+          // que no calce con hoy: es una foto histórica de ESE año, no del presente.
+          const bd = !anioSel || anioSel.anio === anioMasReciente ? universoNacionalTotalMr : anioSel.bd;
           const inscritosTotales = anioSel
             ? suma(anioSel.cursos, 'inscritas')
             : HISTORICO_Q10_MR.reduce((s, a) => s + suma(a.cursos, 'inscritas'), 0);
@@ -1449,7 +1473,11 @@ export default function Pagina() {
               <Kpi
                 titulo={anioSel ? `BD total ${anioSel.anio}` : 'BD total — análisis TODOS (2022-2026)'}
                 valor={bd.toLocaleString('es-CO')}
-                detalle={anioSel ? 'Registradas hasta ese año (acumulado)' : 'Universo real de Mujeres ROFÉ, año más reciente'}
+                detalle={
+                  !anioSel || anioSel.anio === anioMasReciente
+                    ? 'Universo real de Mujeres ROFÉ HOY, en vivo — mismo número que el KPI de arriba'
+                    : `Foto histórica del informe oficial a cierre de ${anioSel.anio} (registradas acumuladas hasta ese año) — no calza con el universo de hoy a propósito, es un dato del pasado`
+                }
               />
               <div className="mt-3 mb-4">
                 <EmbudoFormacionMr
@@ -2656,15 +2684,17 @@ export default function Pagina() {
               universo + v_pub_mr_formacion_universo, migración 056) — pedido 2026-08-27 tras
               comparar contra el Power BI externo tocaunavida.org/reportes-mr. Todo lo de arriba
               en este tab es cohorte-curso Q10 (~11% de las mujeres reales); esta sección cubre
-              a las 5.111. Sin filtro de cohorte/estado/ciudad — "un solo grupo", como pidió
+              a todo el universo (número real, ver universoNacionalTotalMr, NUNCA hardcodeado
+              acá — bug real 2026-08-28: esto decía "5.111" a mano y quedó desfasado cuando la
+              base cambió). Sin filtro de cohorte/estado/ciudad — "un solo grupo", como pidió
               Samuel explícitamente. */}
           {programa === 'mr' && (
             <div className="mt-8">
               <h2 className="font-bold text-lg text-slate-700 mb-1">Universo completo (con y sin Q10)</h2>
               <p className="text-xs text-slate-400 mb-4">
-                Las 5.111 mujeres registradas en la base (fuente única válida: pestaña General del
-                Sheet BD-Mujeres ROFÉ), no solo el ~11% que matriculó en un curso Q10. Comparado
-                contra el reporte Power BI de Mujeres ROFÉ. Sin filtro de cohorte/estado/ciudad.
+                Las {universoNacionalTotalMr.toLocaleString('es-CO')} mujeres registradas en la base (fuente única válida: pestaña
+                General del Sheet BD-Mujeres ROFÉ), no solo el ~11% que matriculó en un curso Q10.
+                Comparado contra el reporte Power BI de Mujeres ROFÉ. Sin filtro de cohorte/estado/ciudad.
               </p>
               <div className="grid md:grid-cols-2 gap-6 mb-6">
                 {DIMENSIONES_UNIVERSO_MR.map((dim) => (
@@ -2690,7 +2720,7 @@ export default function Pagina() {
                 return (
                   <Seccion
                     titulo="Formación — cursos MR completados"
-                    nota="De las 5.111, cuántas completaron 0, 1, 2... cursos en Q10, sumando todos los años juntos (no separado por cohorte)."
+                    nota={`De las ${universoNacionalTotalMr.toLocaleString('es-CO')}, cuántas completaron 0, 1, 2... cursos en Q10, sumando todos los años juntos (no separado por cohorte).`}
                   >
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-5">
                       <Kpi titulo="Mujeres con este dato" valor={total.toLocaleString('es-CO')} detalle="universo completo, 2026-08-27" />
