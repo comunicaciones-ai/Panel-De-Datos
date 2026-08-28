@@ -241,6 +241,22 @@ function EmbudoFormacionMr(
   );
 }
 
+// Punto gris + cantidad "sin dato" (pedido 2026-08-28, Samuel: "¿por qué estas cifras no dan
+// 5.100?" al notar que Edad/Ingresos familiares no suman el universo completo). Cada tarjeta
+// de Demografía solo cuenta a quien SÍ tiene ese campo relleno -- el resto (nunca lo llenó) no
+// aparecía en ningún lado, dejando la resta en silencio. Nunca ocultar esto (regla del
+// rediseño §2.3, mismo espíritu que NoAplica/NotaFiltros): mejor un punto gris chiquito que
+// una cifra que no cuadra sin explicación.
+function PuntoSinDato({ cantidad }: { cantidad: number }) {
+  if (cantidad <= 0) return null;
+  return (
+    <p className="text-[11px] text-slate-400 mb-2 flex items-center gap-1.5">
+      <span className="inline-block w-2 h-2 rounded-full bg-slate-300 shrink-0" />
+      {cantidad.toLocaleString('es-CO')} sin dato (nunca lo llenaron)
+    </p>
+  );
+}
+
 // Mini-tarjeta de un estado de la cohorte (aprobadas / en progreso / en riesgo / retiradas).
 // Muestra el conteo, su % sobre el total de matrículas y un punto de color semáforo.
 function EstadoStat(
@@ -673,6 +689,19 @@ export default function Pagina() {
       .filter((d) => d.ambito === 'nacional')
       .reduce((acc, d) => acc + (d.total ?? 0), 0);
   }, [datos]);
+
+  // Igual que universoNacionalTotalMr, pero respetando el año elegido (anioUniversoMr) — base
+  // correcta para calcular "sin dato" en cada tarjeta de Demografía (pedido 2026-08-28: si una
+  // dimensión no suma el total nacional del año vigente, mostrar cuántas personas faltan por
+  // "sin dato" en vez de dejar la resta en silencio). Sin filtro de ciudad a propósito, mismo
+  // motivo que TarjetaDemografiaUniverso (32.4% de pérdida k-anonimato si se cruza con ciudad).
+  const universoNacionalAnioActualMr = useMemo(() => {
+    if (!datos) return 0;
+    const filas = datos.mrUniverso.filter(
+      (d) => d.ambito === 'nacional' && (anioUniversoMr === 'todos' || d.anio_registro === anioUniversoMr),
+    );
+    return filas.reduce((acc, d) => acc + (d.total ?? 0), 0);
+  }, [datos, anioUniversoMr]);
 
   // Ciudades del universo MR (v_pub_mr_universo, ambito='ciudad'), respetando el año elegido —
   // fuente correcta para el selector de ciudad de VistaUniversoMr (gruposGeografia de abajo es
@@ -1298,6 +1327,13 @@ export default function Pagina() {
         </Seccion>
       );
     }
+    // "sin dato" = universo del año vigente menos lo que suma esta dimensión. NO aplica a
+    // tipo_credito -- ese campo no es "todas deberían tenerlo y algunas no lo llenaron", es
+    // presencia de un microcrédito/iCredit real (la inmensa mayoría nunca tuvo uno, eso no es
+    // un dato faltante). Para el resto sí es un campo demográfico esperable de cualquiera.
+    const sumaDimension = Array.from(mapa.values()).reduce((a, b) => a + b, 0);
+    const sinDato = dimension === 'tipo_credito' ? 0 : Math.max(0, universoNacionalAnioActualMr - sumaDimension);
+
     if (dimension === 'estado_civil' || dimension === 'tipo_vivienda' || dimension === 'tipo_credito') {
       const filas = Array.from(mapa.entries()).map(([categoria, total], i) => ({
         nombre: ETIQUETA_MR[categoria] ?? categoria,
@@ -1306,6 +1342,7 @@ export default function Pagina() {
       }));
       return (
         <Seccion titulo={ETIQUETA_DIMENSION_UNIVERSO[dimension]}>
+          <PuntoSinDato cantidad={sinDato} />
           <GraficoEmprendimiento datos={filas} />
         </Seccion>
       );
@@ -1320,6 +1357,7 @@ export default function Pagina() {
       .sort((a, b) => (orden ? orden.indexOf(a.orden) - orden.indexOf(b.orden) : b.total - a.total));
     return (
       <Seccion titulo={ETIQUETA_DIMENSION_UNIVERSO[dimension]} nota={dimension === 'edad_rango' ? 'En rangos — nunca edades individuales.' : undefined}>
+        <PuntoSinDato cantidad={sinDato} />
         <GraficoBarras datos={filas} dataKey="total" nombre="Personas" color={C.naranja} rotarEtiquetas={dimension === 'ingresos_familiares'} />
       </Seccion>
     );
