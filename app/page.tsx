@@ -107,29 +107,37 @@ const COLOR_GENERO: Record<string, string> = {
 // Corrección 2026-08-27 (mismo día, más tarde): bd de 2026 baja de 5110 a 5109 -- Samuel
 // confirmó la baja de una participante el mismo día, ver
 // docs/procesos/postulantes-mr-supabase.md en admin-usable, sección "Remoción puntual".
+//
+// Normalización 2026-08-31 (pedido de Samuel): el Excel oficial usa un nombre de curso
+// DISTINTO cada año para la misma ruta (ej. "Emprendimiento" 2022 → "Taller de
+// Emprendimiento..." 2023 → "De la idea a la acción..." 2024-2026) — son solo 4 rutas reales
+// (5ta desde 2025: "Empoderamiento en Ventas..."), no cursos nuevos cada año. Se unificó el
+// `nombre` de cada fila al literal usado en 2026 (el más reciente) en los 5 años, para que la
+// tabla por curso y cualquier agrupación por nombre trate cada ruta como una sola serie en el
+// tiempo. "Mindfulness" (solo 2022, sin equivalente en años posteriores) se deja tal cual.
 type CursoHistoricoMr = { nombre: string; inscritas: number | null; iniciados: number | null; completados: number | null };
 type AnioHistoricoMr = { anio: string; bd: number; cursos: CursoHistoricoMr[] };
 const HISTORICO_Q10_MR: AnioHistoricoMr[] = [
   {
     anio: '2022', bd: 704, cursos: [
-      { nombre: 'Habilidades Para Emprendedoras del Siglo XXI', inscritas: 121, iniciados: 24, completados: 4 },
-      { nombre: 'Emprendimiento', inscritas: 120, iniciados: 22, completados: 10 },
-      { nombre: 'Finanzas Para emprendedoras', inscritas: 111, iniciados: 9, completados: 9 },
-      { nombre: 'Impulsa tu Negocio en Plataformas Digitales', inscritas: 96, iniciados: 7, completados: 5 },
+      { nombre: 'Habilidades Clave para Emprender con Propósito', inscritas: 121, iniciados: 24, completados: 4 },
+      { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 120, iniciados: 22, completados: 10 },
+      { nombre: 'Finanzas inteligentes, gestión para emprendedoras', inscritas: 111, iniciados: 9, completados: 9 },
+      { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: 96, iniciados: 7, completados: 5 },
       { nombre: 'Mindfulness', inscritas: 90, iniciados: 10, completados: 4 },
     ],
   },
   {
     anio: '2023', bd: 3311, cursos: [
-      { nombre: 'Habilidades para Emprendedoras del Siglo XXI', inscritas: 244, iniciados: 67, completados: 6 },
-      { nombre: 'Taller de Emprendimiento: Una Idea de Negocio', inscritas: 292, iniciados: 128, completados: 27 },
-      { nombre: 'Curso de Finanzas para Emprendedoras', inscritas: 298, iniciados: 76, completados: 22 },
-      { nombre: 'Impulsa tú Negocio en Plataformas Digitales', inscritas: 233, iniciados: 53, completados: 12 },
+      { nombre: 'Habilidades Clave para Emprender con Propósito', inscritas: 244, iniciados: 67, completados: 6 },
+      { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 292, iniciados: 128, completados: 27 },
+      { nombre: 'Finanzas inteligentes, gestión para emprendedoras', inscritas: 298, iniciados: 76, completados: 22 },
+      { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: 233, iniciados: 53, completados: 12 },
     ],
   },
   {
     anio: '2024', bd: 4322, cursos: [
-      { nombre: 'Habilidades del ser para Emprendedoras del Siglo 21', inscritas: 600, iniciados: 154, completados: 34 },
+      { nombre: 'Habilidades Clave para Emprender con Propósito', inscritas: 600, iniciados: 154, completados: 34 },
       { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 416, iniciados: 148, completados: 41 },
       { nombre: 'Finanzas inteligentes, gestión para emprendedoras', inscritas: 105, iniciados: 35, completados: 19 },
       { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: 235, iniciados: 67, completados: 29 },
@@ -137,7 +145,7 @@ const HISTORICO_Q10_MR: AnioHistoricoMr[] = [
   },
   {
     anio: '2025', bd: 4712, cursos: [
-      { nombre: 'Habilidades del ser para Emprendedoras del Siglo 21', inscritas: 268, iniciados: 80, completados: 32 },
+      { nombre: 'Habilidades Clave para Emprender con Propósito', inscritas: 268, iniciados: 80, completados: 32 },
       { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 334, iniciados: 84, completados: 34 },
       { nombre: 'Finanzas inteligentes, gestión para emprendedoras', inscritas: 155, iniciados: 83, completados: 41 },
       { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: 108, iniciados: 36, completados: 25 },
@@ -219,7 +227,7 @@ function EmbudoFormacionMr(
         <div className="rounded-lg border border-slate-200/70 bg-white/40 p-2">
           <p className="text-[10px] uppercase tracking-wide text-slate-400">Aprobados</p>
           <p className="text-lg font-bold kpi-valor" style={{ color: C.verde }}>{aprobados.toLocaleString('es-CO')}</p>
-          <p className="text-[10px] text-slate-400">{pctAprobados.toFixed(1)}% de inscritos</p>
+          <p className="text-[10px] text-slate-400">{pctAprobados.toFixed(1)}% de matrículas</p>
         </div>
       </div>
       <div className="relative h-8 w-full rounded-lg overflow-hidden" style={{ background: `${C.naranja}30` }}>
@@ -233,7 +241,7 @@ function EmbudoFormacionMr(
         />
       </div>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-2 text-[11px] text-slate-500">
-        <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: `${C.naranja}90` }} />Inscritos {inscritos.toLocaleString('es-CO')}</span>
+        <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: `${C.naranja}90` }} />Matrículas {inscritos.toLocaleString('es-CO')}</span>
         <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: C.azul2 }} />Entraron a Q10 {iniciados.toLocaleString('es-CO')} ({pctIniciados.toFixed(1)}%)</span>
         <span><span className="inline-block w-2 h-2 rounded-full mr-1" style={{ background: C.verde }} />Aprobaron {aprobados.toLocaleString('es-CO')} ({pctAprobados.toFixed(1)}%)</span>
       </div>
@@ -1647,7 +1655,7 @@ export default function Pagina() {
                 />
               </div>
               <p className="text-[11px] text-slate-400 mb-4">
-                "0 cursos" (nunca llegaron a Bienvenida) = BD − Σiniciados, aproximado (piso): "iniciados" es a nivel de inscripción por curso (si una mujer empezó 2 cursos, resta 2 veces), no hay dato de persona única antes de 2027. El resto del embudo (inscritos/Q10/aprobados) también es a nivel de inscripción-curso, no headcount único.
+                "0 cursos" (nunca llegaron a Bienvenida) = BD − Σiniciados, aproximado (piso): "iniciados" es a nivel de matrícula por curso (si una mujer empezó 2 cursos, resta 2 veces), no hay dato de persona única antes de 2027. El resto del embudo (matrículas/Q10/aprobados) también es a nivel de matrícula-curso, no headcount único.
               </p>
               {!anioSel ? (
                 <NoAplica motivo='el detalle por curso solo se ve un año a la vez — los cursos cambian de nombre cada año. Elige un año en el header de arriba.' suave />
@@ -1657,7 +1665,7 @@ export default function Pagina() {
                     <thead>
                       <tr className="text-left text-slate-500 border-b border-slate-200">
                         <th className="py-2 pr-4">Curso</th>
-                        <th className="py-2 pr-4 text-right">Inscritas</th>
+                        <th className="py-2 pr-4 text-right">Matrículas</th>
                         <th className="py-2 pr-4 text-right">Sin iniciar</th>
                         <th className="py-2 text-right">Completaron</th>
                       </tr>
