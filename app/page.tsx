@@ -1693,7 +1693,39 @@ export default function Pagina() {
                 "0 cursos" (nunca llegaron a Bienvenida) = BD − Σiniciados, aproximado (piso): "iniciados" es a nivel de matrícula por curso (si una mujer empezó 2 cursos, resta 2 veces), no hay dato de persona única antes de 2027. El resto del embudo (matrículas/Q10/aprobados) también es a nivel de matrícula-curso, no headcount único.
               </p>
               {!anioSel ? (
-                <NoAplica motivo='el detalle por curso solo se ve un año a la vez — los cursos cambian de nombre cada año. Elige un año en el header de arriba.' suave />
+                <div className="overflow-x-auto">
+                  <p className="text-xs text-slate-400 mb-2">
+                    2025 vs 2026 — los únicos 2 años con dato corroborable (ver aviso arriba). Una
+                    fila por curso × año; 2022-2024 no se listan acá por la misma razón del aviso.
+                  </p>
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="text-left text-slate-500 border-b border-slate-200">
+                        <th className="py-2 pr-4">Curso</th>
+                        <th className="py-2 pr-4 text-right">Año</th>
+                        <th className="py-2 pr-4 text-right">Iniciaron en Q10</th>
+                        <th className="py-2 text-right">Completados</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(['2025', '2026'] as const).flatMap((anio) => {
+                        const bloque = HISTORICO_Q10_MR.find((a) => a.anio === anio);
+                        return (bloque?.cursos ?? []).map((curso) => (
+                          <tr key={`${curso.nombre}-${anio}`} className="border-b border-slate-100">
+                            <td className="py-2 pr-4">{curso.nombre}</td>
+                            <td className="py-2 pr-4 text-right text-slate-400">{anio}</td>
+                            <td className="py-2 pr-4 text-right">
+                              {curso.iniciados != null ? curso.iniciados.toLocaleString('es-CO') : '—'}
+                            </td>
+                            <td className="py-2 text-right font-semibold" style={{ color: C.verde }}>
+                              {curso.completados != null ? curso.completados.toLocaleString('es-CO') : 'Sin datos aún'}
+                            </td>
+                          </tr>
+                        ));
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
