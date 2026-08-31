@@ -475,6 +475,11 @@ export default function Pagina() {
   // Unidad del desglose "Estado de la cohorte": matrículas (inscripciones) o estudiantes (personas).
   // Solo tiene sentido bajo Estado=Activos (v_cohorte_estudiantes* no distingue retirados).
   const [unidadEstadoCohorte, setUnidadEstadoCohorte] = useState<'matriculas' | 'estudiantes'>('matriculas');
+  // Unidad de "Completación por curso" cuando esMrTodos (pedido 2026-08-31): igual que
+  // unidadEstadoCohorte de arriba, pero para las 5 rutas normalizadas de MR — 'matriculas'
+  // cuenta cada inscripción (una mujer que repitió el curso en 2 años cuenta 2 veces),
+  // 'personas' cuenta headcount real (v_mr_curso_normalizado, migración 061).
+  const [unidadCursoMr, setUnidadCursoMr] = useState<'matriculas' | 'personas'>('personas');
   // Alcance del bloque Emoflow. 'canonico' (default) = solo estudiantes vigentes según la
   // pestaña Seguimiento (742) — coherente con el resto del panel. 'todos' = universo
   // histórico completo del CSV de Emoflow (827): incluye 17 en retiro probable y 68 que
@@ -617,8 +622,29 @@ export default function Pagina() {
       datos
         ? datos.cursos.filter((c) => c.programa === programa && (esMrTodos || c.cohorte === cohorte))
         : [],
-    [datos, programa, cohorte],
+    [datos, programa, cohorte, esMrTodos],
   );
+
+  // "Completación por curso" para esMrTodos: 5 rutas reales en vez de 14 filas curso×cohorte
+  // (ver v_mr_curso_normalizado, migración 061). Shape compatible con CursoCompletion para
+  // reusar <GraficoCursos>/la tabla sin duplicar JSX — 'matriculados'/'completados' cambian de
+  // significado según unidadCursoMr (filas de enrollments vs. personas únicas), el resto de
+  // campos de CursoCompletion no aplican acá (cohorte/en_progreso/sin_iniciar/promedio_avance).
+  const cursosNormalizadosMr = useMemo(() => {
+    if (!datos || !esMrTodos) return [];
+    return datos.mrCursoNormalizado.map((c) => {
+      const matriculados = unidadCursoMr === 'personas' ? c.personas : c.matriculados;
+      const completados = unidadCursoMr === 'personas' ? c.personas_completadas : c.completados;
+      const pct = unidadCursoMr === 'personas' ? c.pct_personas_completadas : c.pct_completados;
+      return {
+        curso: c.curso, cohorte: 'todos', programa: 'mr' as const,
+        matriculados, completados,
+        en_progreso: Math.max(0, matriculados - completados), sin_iniciar: 0,
+        pct_completados: pct != null ? String(pct) : null,
+        promedio_avance: null,
+      };
+    });
+  }, [datos, esMrTodos, unidadCursoMr]);
 
   // Cursos filtrados por ciudad — v_curso_completion_por_ciudad sigue siendo JC-only (sin
   // equivalente MR construido todavía). Con MR + ciudad elegida se degrada al total del
@@ -2032,7 +2058,7 @@ export default function Pagina() {
             ) : (
               <Kpi
                 titulo="Cursos"
-                valor={String(cursosProg.length)}
+                valor={String(esMrTodos ? cursosNormalizadosMr.length : cursosProg.length)}
                 detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${etiquetaCohorte}`}
               />
             )}
@@ -2568,6 +2594,29 @@ export default function Pagina() {
                 Desglose por ciudad aún no disponible para Cursos en Mujeres ROFÉ — mostrando el total del programa.
               </p>
             )}
+            {esMrTodos && !ciudadElegida && (
+              <>
+                <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-3">
+                  {([['personas', 'Por individuo'], ['matriculas', 'Por matrícula']] as const).map(([v, txt]) => (
+                    <button
+                      key={v}
+                      onClick={() => setUnidadCursoMr(v)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${
+                        unidadCursoMr === v ? 'pill-metal pill-metal-rosa' : 'text-slate-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      {txt}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400 mb-2">
+                  {unidadCursoMr === 'personas'
+                    ? 'Por individuo: cada mujer cuenta 1 sola vez por ruta, aunque la haya cursado en más de un año.'
+                    : 'Por matrícula: cada inscripción cuenta aparte — una mujer que repitió la misma ruta en 2 años suma 2.'}
+                  {' '}Fusiona las 5 rutas reales de los 5 años (Q10 reutiliza un nombre de curso distinto cada año para la misma ruta).
+                </p>
+              </>
+            )}
             <GraficoCursos
               datos={ciudadElegida
                 ? cursosPorCiudadFiltrados.map((c) => ({
@@ -2576,7 +2625,7 @@ export default function Pagina() {
                     en_progreso: Math.max(0, Number(c.matriculados ?? 0) - Number(c.completados ?? 0)),
                     sin_iniciar: 0,
                   }))
-                : cursosProg}
+                : esMrTodos ? cursosNormalizadosMr : cursosProg}
             />
           </Seccion>
           <Seccion titulo="Detalle por curso">
@@ -2585,14 +2634,14 @@ export default function Pagina() {
                 <thead>
                   <tr className="text-left text-slate-500 border-b border-slate-200">
                     <th className="py-2 pr-4">Curso</th>
-                    <th className="py-2 pr-4 text-right">Matriculados</th>
+                    <th className="py-2 pr-4 text-right">{esMrTodos && unidadCursoMr === 'personas' ? 'Personas' : 'Matrículas'}</th>
                     <th className="py-2 pr-4 text-right">Completados</th>
                     <th className="py-2 pr-4 text-right">% Completados</th>
                     <th className="py-2 text-right">Avance promedio</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(ciudadElegida ? cursosPorCiudadFiltrados : cursosProg).map((c) => (
+                  {(ciudadElegida ? cursosPorCiudadFiltrados : esMrTodos ? cursosNormalizadosMr : cursosProg).map((c) => (
                     <tr key={c.curso} className="border-b border-slate-100">
                       <td className="py-2 pr-4">{c.curso}</td>
                       <td className="py-2 pr-4 text-right">{c.matriculados}</td>
