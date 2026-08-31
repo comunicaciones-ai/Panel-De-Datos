@@ -1649,6 +1649,15 @@ export default function Pagina() {
                   : '% de la tabla = completaron ÷ SÍ llegaron a Bienvenida (excluye a quien nunca entró).')
               }
             >
+              {(!anioSel || (anioSel.anio !== '2025' && anioSel.anio !== '2026')) && (
+                <p className="text-xs rounded-lg px-3 py-2 mb-4" style={{ background: `${C.rojo}15`, color: C.rojo }}>
+                  ⚠ Sin trazabilidad confirmada antes de 2025: la coordinación confirmó
+                  (2026-08-31) que 2022-2024 no tienen un consolidado válido verificable — ni
+                  el Excel oficial ni Q10 capturaron esos años completos (ver auditoría cruzada
+                  en postulantes-mr-supabase.md). Solo 2025 y 2026 son corroborables hoy;
+                  {anioSel ? ` los números de ${anioSel.anio} de abajo son la mejor referencia disponible, no una cifra auditada.` : ' "Todos" suma años sin auditar junto con los que sí lo están.'}
+                </p>
+              )}
               <div className="flex gap-1 tarjeta-glass p-1 w-fit mb-4 flex-wrap">
                 {([['inscritas', 'Se inscribió y completó'], ['iniciados', 'Ingresó a Q10 y completó']] as const).map(([v, txt]) => (
                   <button
@@ -2592,6 +2601,14 @@ export default function Pagina() {
             {ciudadElegida && programa === 'mr' && (
               <p className="text-xs text-slate-400 mb-2">
                 Desglose por ciudad aún no disponible para Cursos en Mujeres ROFÉ — mostrando el total del programa.
+              </p>
+            )}
+            {programa === 'mr' && (esMrTodos || (cohorte !== '2025' && cohorte !== '2026')) && (
+              <p className="text-xs rounded-lg px-3 py-2 mb-3" style={{ background: `${C.rojo}15`, color: C.rojo }}>
+                ⚠ Sin trazabilidad confirmada antes de 2025: la coordinación confirmó
+                (2026-08-31) que 2022-2024 no tienen un consolidado válido verificable — Q10 no
+                capturó esos años completos, con o sin fusionar rutas. Solo 2025 y 2026 son
+                corroborables hoy.
               </p>
             )}
             {esMrTodos && !ciudadElegida && (
