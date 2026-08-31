@@ -348,6 +348,67 @@ function agregarPorCategoria(filas: PubDemografia[], dimension: string) {
   return mapa;
 }
 
+// ── Agregación "Todos los años" (pedido 2026-08-31, Mujeres ROFÉ: ya hay histórico real
+// 2023-2026 tras el backfill con archivado=true, ver postulantes-mr-supabase.md). Las tablas
+// cohorte-scoped (programas/cohorte/ingresos·pubCohorte/estudiantes) traen UNA fila por
+// cohorte — sumarlas a mano en vez de promediar porcentajes ciegamente (mismo criterio que
+// retencionPorCiudad ya usa más abajo: recalcular el % desde los conteos, no promediar %).
+// Las tablas ya-listadas (cursos, aprobacion, demografía) NO necesitan esto — simplemente se
+// deja de filtrar por cohorte y cada fila se distingue sola (Q10 reutiliza nombres de curso
+// entre años, UNIQUE(nombre, cohorte), así que dos años del mismo curso son dos filas, no una
+// que haya que fusionar).
+function sumarProgramaStats(filas: { participantes: number; matriculas: number; completadas: number; promedio_avance: string | null; programa: 'jc' | 'mr' | 'stand'; cohorte: string }[]) {
+  if (filas.length === 0) return undefined;
+  const participantes = filas.reduce((s, p) => s + (p.participantes ?? 0), 0);
+  const matriculas = filas.reduce((s, p) => s + (p.matriculas ?? 0), 0);
+  const completadas = filas.reduce((s, p) => s + (p.completadas ?? 0), 0);
+  const sumaPond = filas.reduce((s, p) => s + Number(p.promedio_avance ?? 0) * (p.matriculas ?? 0), 0);
+  return {
+    programa: filas[0].programa, cohorte: 'todos',
+    participantes, matriculas, completadas,
+    promedio_avance: matriculas ? (sumaPond / matriculas).toFixed(1) : null,
+  };
+}
+
+function sumarCohorteStats(filas: { total_participantes: number; con_emprendimiento: number; sin_emprendimiento: number; edad_promedio: string | null; programa: 'jc' | 'mr' | 'stand'; cohorte: string; computed_at: string }[]) {
+  if (filas.length === 0) return undefined;
+  const total_participantes = filas.reduce((s, c) => s + (c.total_participantes ?? 0), 0);
+  const con_emprendimiento = filas.reduce((s, c) => s + (c.con_emprendimiento ?? 0), 0);
+  const sin_emprendimiento = filas.reduce((s, c) => s + (c.sin_emprendimiento ?? 0), 0);
+  const sumaEdadPond = filas.reduce((s, c) => s + Number(c.edad_promedio ?? 0) * (c.total_participantes ?? 0), 0);
+  return {
+    cohorte: 'todos', programa: filas[0].programa, computed_at: filas[0].computed_at,
+    total_participantes, con_emprendimiento, sin_emprendimiento,
+    porcentaje_con_emprendimiento: total_participantes ? String(Math.round((1000 * con_emprendimiento) / total_participantes) / 10) : null,
+    edad_promedio: total_participantes ? (sumaEdadPond / total_participantes).toFixed(1) : null,
+  };
+}
+
+function sumarIngresos(filas: { ingresados: number; activos: number; retirados: number; programa: 'jc' | 'mr' | 'stand'; cohorte: string }[]) {
+  if (filas.length === 0) return undefined;
+  return {
+    cohorte: 'todos', programa: filas[0].programa,
+    ingresados: filas.reduce((s, f) => s + (f.ingresados ?? 0), 0),
+    activos: filas.reduce((s, f) => s + (f.activos ?? 0), 0),
+    retirados: filas.reduce((s, f) => s + (f.retirados ?? 0), 0),
+    pct_aprobados: null as string | number | null,
+  };
+}
+
+function sumarCohorteEstudiantes(filas: { activos: number; al_dia: number; en_progreso: number; en_riesgo: number; prom_cursos_aprobados: number | string | null; programa: 'jc' | 'mr' | 'stand'; cohorte: string }[]) {
+  if (filas.length === 0) return undefined;
+  const activos = filas.reduce((s, c) => s + (c.activos ?? 0), 0);
+  const al_dia = filas.reduce((s, c) => s + (c.al_dia ?? 0), 0);
+  const en_progreso = filas.reduce((s, c) => s + (c.en_progreso ?? 0), 0);
+  const en_riesgo = filas.reduce((s, c) => s + (c.en_riesgo ?? 0), 0);
+  const sumaPond = filas.reduce((s, c) => s + Number(c.prom_cursos_aprobados ?? 0) * (c.activos ?? 0), 0);
+  return {
+    cohorte: 'todos', programa: filas[0].programa, activos, al_dia, en_progreso, en_riesgo,
+    prom_cursos_aprobados: activos ? (sumaPond / activos).toFixed(2) : null,
+    prom_cursos_inscritos: null as number | string | null,
+  };
+}
+
 // Agrega v_pub_emprendimiento (ya filtrada) por situación — promedios ponderados por `total`,
 // ignorando celdas suprimidas (total=null) en el peso.
 function agregarEmprendimiento(filas: PubEmprendimiento[]) {
@@ -443,6 +504,13 @@ export default function Pagina() {
   const cohorteActual = cohortes[0] ?? '';
   const cohorte = cohorteElegida ?? cohorteActual;
   const esActual = cohorte === cohorteActual && cohorte !== '';
+  // "Todos" los años, SOLO Mujeres ROFÉ (2026-08-31) — ver comentario junto al selector de
+  // cohorte más abajo. Repetir `programa === 'mr'` en cada sitio evita que este valor se
+  // "filtre" a JC si `cohorteElegida` queda en 'todos' al cambiar de programa.
+  const esMrTodos = programa === 'mr' && cohorte === 'todos';
+  // Texto de despliegue: "todos" a secas lee mal en frases ("Ruta Mujeres ROFÉ todos") — usar
+  // en cualquier interpolación de `cohorte` pensada para texto, nunca para comparar valores.
+  const etiquetaCohorte = cohorte === 'todos' ? 'todos los años' : cohorte;
 
   // Geografía por municipio (v_pub_geografia) — fuente ÚNICA del selector de ciudad, cubre
   // ambos programas (antes el selector de arriba solo existía para JC, vía v_demografia_grupo).
@@ -454,7 +522,7 @@ export default function Pagina() {
   const geografiaProg = useMemo(
     () =>
       datos
-        ? datos.geografiaMunicipio.filter((g) => g.programa === programa && g.cohorte === cohorte)
+        ? datos.geografiaMunicipio.filter((g) => g.programa === programa && (esMrTodos || g.cohorte === cohorte))
         : [],
     [datos, programa, cohorte],
   );
@@ -539,7 +607,7 @@ export default function Pagina() {
   const cursosProg = useMemo(
     () =>
       datos
-        ? datos.cursos.filter((c) => c.programa === programa && c.cohorte === cohorte)
+        ? datos.cursos.filter((c) => c.programa === programa && (esMrTodos || c.cohorte === cohorte))
         : [],
     [datos, programa, cohorte],
   );
@@ -582,11 +650,11 @@ export default function Pagina() {
     return datos.pubDemografia.filter(
       (d) =>
         d.programa === programa &&
-        d.cohorte === cohorte &&
+        (esMrTodos || d.cohorte === cohorte) &&
         (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
         (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
     );
-  }, [datos, programa, cohorte, estado, ciudadElegida]);
+  }, [datos, programa, cohorte, estado, ciudadElegida, esMrTodos]);
 
   // "No aplica" (estructural, por programa) vs. "sin datos" (el filtro vigente no tiene
   // filas) para cada dimensión — se evalúa sobre TODO el dataset del programa, ignorando el
@@ -599,11 +667,11 @@ export default function Pagina() {
     return datos.pubEmprendimiento.filter(
       (d) =>
         d.programa === programa &&
-        d.cohorte === cohorte &&
+        (esMrTodos || d.cohorte === cohorte) &&
         (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
         (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
     );
-  }, [datos, programa, cohorte, estado, ciudadElegida]);
+  }, [datos, programa, cohorte, estado, ciudadElegida, esMrTodos]);
   const emprendimientoAplicaPrograma = !!datos && datos.pubEmprendimiento.some((d) => d.programa === programa);
 
   // Impacto financiero MR (Fase 2 ampliación PBI, migración 046, 2026-08-15) — la vista ya
@@ -907,9 +975,9 @@ export default function Pagina() {
   const aprobacionProg = useMemo(
     () =>
       datos
-        ? datos.aprobacion.filter((a) => a.programa === programa && a.cohorte === cohorte)
+        ? datos.aprobacion.filter((a) => a.programa === programa && (esMrTodos || a.cohorte === cohorte))
         : [],
-    [datos, programa, cohorte],
+    [datos, programa, cohorte, esMrTodos],
   );
 
   // Única decisión de qué vista de Cursos usar (§1.2 del diagnóstico: antes se calculaba dos
@@ -952,7 +1020,7 @@ export default function Pagina() {
   const distribucionEst = useMemo(() => {
     if (!datos) return [] as { etiqueta: string; estudiantes: number }[];
     const filas = datos.estudiantesDist.filter(
-      (d) => d.cohorte === cohorte && d.programa === programa,
+      (d) => (esMrTodos || d.cohorte === cohorte) && d.programa === programa,
     );
     if (filas.length === 0) return [];
     const max = Math.max(...filas.map((f) => f.cursos_aprobados));
@@ -960,18 +1028,38 @@ export default function Pagina() {
       etiqueta: String(n),
       estudiantes: filas.find((f) => f.cursos_aprobados === n)?.estudiantes ?? 0,
     }));
-  }, [datos, cohorte, programa]);
+  }, [datos, cohorte, programa, esMrTodos]);
 
   // cohorte_ingresos solo tiene la cohorte viva; para las cerradas (2019–2025) el canon oficial
   // vive en v_pub_cohorte (mismo dato que el banner de panel_control_gui.py). Fallback → las
   // tarjetas de cohortes cerradas muestran ingresados/culminantes/retirados/retención del canon
   // en vez de quedar en blanco. La viva (2026) sigue tomando cohorte_ingresos (idéntico al canon).
-  const ingresosProg = useMemo(
-    () =>
-      datos?.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa) ??
-      datos?.pubCohorte.find((i) => i.cohorte === cohorte && i.programa === programa),
-    [datos, cohorte, programa],
-  );
+  const ingresosProg = useMemo(() => {
+    if (!datos) return undefined;
+    if (esMrTodos) {
+      // Una fila por cohorte, con la misma precedencia que el caso normal (ingresos = cohorte
+      // viva, pubCohorte = canon de cohortes cerradas) — se resuelve cohorte por cohorte antes
+      // de sumar, para no mezclar una fuente incompleta si algún año tuviera ambas.
+      const filas = cohortes
+        .map((coh) =>
+          datos.ingresos.find((i) => i.cohorte === coh && i.programa === programa) ??
+          datos.pubCohorte.find((i) => i.cohorte === coh && i.programa === programa),
+        )
+        .filter((f): f is NonNullable<typeof f> => !!f);
+      // Cobertura PARCIAL (ej. hoy: solo 2026 tiene fila canon en cohorte_ingresos/v_pub_cohorte
+      // — 2023-2025 nunca se curaron ahí, distinto del histórico Q10 crudo que sí se backfilleó
+      // en courses/enrollments) → undefined a propósito, para que el KPI caiga al layout
+      // "cohorte sin canon" (participantes/matrículas/avance/cursos, ya alimentado por
+      // co/ps más abajo) en vez de mostrar solo-2026 con la etiqueta "Todos". Mismo criterio
+      // que ya aplica cohorte por cohorte cuando falta esta fila.
+      if (filas.length < cohortes.length) return undefined;
+      return sumarIngresos(filas);
+    }
+    return (
+      datos.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa) ??
+      datos.pubCohorte.find((i) => i.cohorte === cohorte && i.programa === programa)
+    );
+  }, [datos, cohorte, programa, cohortes, esMrTodos]);
 
   // Denominador correcto para el punto gris "sin dato" de TarjetaDemografia (pedido 2026-08-28,
   // Samuel: "revisa que las otras vistas también cuadren" tras el fix de MR). Auditoría real
@@ -1044,11 +1132,17 @@ export default function Pagina() {
 
   const kpis = useMemo(() => {
     if (!datos) return null;
-    const ps = datos.programas.find(
-      (p) => p.programa === programa && p.cohorte === cohorte,
-    );
+    // "Todos" los años (MR, 2026-08-31): estas 2 tablas traen una fila por cohorte — para
+    // 'todos' se suman en vez de buscar una fila que no existe (ver sumarProgramaStats/
+    // sumarCohorteStats arriba, mismo criterio de recalcular % desde conteos que ya usa
+    // retencionPorCiudad).
+    const ps = esMrTodos
+      ? sumarProgramaStats(datos.programas.filter((p) => p.programa === programa))
+      : datos.programas.find((p) => p.programa === programa && p.cohorte === cohorte);
     // cohorte_stats viene separada por programa desde la migración de separación JC/MR
-    const co = datos.cohorte.find((c) => c.cohorte === cohorte && c.programa === programa);
+    const co = esMrTodos
+      ? sumarCohorteStats(datos.cohorte.filter((c) => c.programa === programa))
+      : datos.cohorte.find((c) => c.cohorte === cohorte && c.programa === programa);
     const ing = ingresosProg;
 
     let participantes = ps?.participantes ?? 0;
@@ -1171,7 +1265,7 @@ export default function Pagina() {
       activos: ing?.activos ?? null,
       retirados: ing?.retirados ?? null,
     };
-  }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
+  }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, esMrTodos, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
 
   // Retención y Asistencia se quitaron del tab bar de MR (pedido 2026-08-27, tras la
   // auditoría de 2 agentes): miden procesos que MR no tiene estructurados de la misma forma
@@ -1181,6 +1275,9 @@ export default function Pagina() {
   const cambiarPrograma = (p: Programa) => {
     setPrograma(p);
     if (p === 'mr' && (tab === 'Retención' || tab === 'Asistencia')) setTab('Resumen');
+    // "Todos" es exclusivo de Mujeres ROFÉ (ver esMrTodos) — si venía elegido al cambiar a
+    // Jóvenes creaTIvos, se descarta para no dejar el selector en un valor sin botón activo.
+    if (p === 'jc' && cohorteElegida === 'todos') setCohorteElegida(null);
   };
   const cambiarCohorte = (coh: string) => setCohorteElegida(coh);
 
@@ -1711,9 +1808,12 @@ export default function Pagina() {
       ) : (
       <>
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        {/* Selector de cohorte (actual + históricas de Q10) */}
+        {/* Selector de cohorte (actual + históricas de Q10). "Todos" solo para Mujeres ROFÉ
+            (2026-08-31): tras el backfill de archivado=true ya hay histórico real 2023-2026,
+            a diferencia de JC donde "Todos" mezclaría procesos muy distintos (Retención/
+            Asistencia/Emoflow) que no están pensados para verse combinados entre años. */}
         <div className="flex gap-1 tarjeta-glass p-1">
-          {cohortes.map((coh) => (
+          {(programa === 'mr' ? ['todos', ...cohortes] : cohortes).map((coh) => (
             <button
               key={coh}
               onClick={() => cambiarCohorte(coh)}
@@ -1723,7 +1823,7 @@ export default function Pagina() {
                   : 'text-slate-600 hover:bg-slate-100'
               }`}
             >
-              {coh}
+              {coh === 'todos' ? 'Todos' : coh}
             </button>
           ))}
         </div>
@@ -1842,12 +1942,12 @@ export default function Pagina() {
               // (2024=470 vs 608). El filtro Estado sigue disponible; en cohorte cerrada todas las cifras
               // canónicas se muestran juntas (activos/retirados/ingresados), como en el GUI.
               <>
-                <Kpi titulo={`Ingresados ${NOMBRE_PROGRAMA[programa]}`} valor={String(kpis.ingresados)} detalle={`Cohorte ${cohorte} — universo oficial (canon, sin staff ni pruebas)`} />
+                <Kpi titulo={`Ingresados ${NOMBRE_PROGRAMA[programa]}`} valor={String(kpis.ingresados)} detalle={`Cohorte ${etiquetaCohorte} — universo oficial (canon, sin staff ni pruebas)`} />
                 <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * (kpis.activos ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.verde} />
                 <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * (kpis.retirados ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.rojo} />
                 <Kpi titulo="Culminantes" valor={kpis.activos != null ? String(kpis.activos) : '—'} detalle="terminaron el programa (canon)" />
                 <Kpi titulo="Retirados" valor={kpis.retirados != null ? String(kpis.retirados) : '—'} detalle="se retiraron (canon)" />
-                <Kpi titulo="Cursos" valor={String(cursosProg.length)} detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${cohorte}`} />
+                <Kpi titulo="Cursos" valor={String(cursosProg.length)} detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${etiquetaCohorte}`} />
               </>
             ) : (
               <>
@@ -1861,12 +1961,12 @@ export default function Pagina() {
                 valor={String(kpis.cifraEstado)}
                 detalle={
                   estado === 'todos'
-                    ? `Cohorte ${cohorte} completa: ${kpis.ingresados ?? '—'} ingresados (canon oficial)`
+                    ? `Cohorte ${etiquetaCohorte} completa: ${kpis.ingresados ?? '—'} ingresados (canon oficial)`
                     : estado === 'retirados'
-                      ? `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canon oficial)`
+                      ? `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${etiquetaCohorte} (canon oficial)`
                       : kpis.usarActualesSeguimiento
                         ? undefined
-                        : `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${cohorte} (canon oficial)`
+                        : `De ${kpis.ingresados ?? '—'} ingresados en la cohorte ${etiquetaCohorte} (canon oficial)`
                 }
               />
             ) : (
@@ -1879,10 +1979,10 @@ export default function Pagina() {
                 valor={String(kpis.participantes)}
                 detalle={
                   ciudadElegida
-                    ? `Activos en la cohorte ${cohorte}. La cohorte canónica (ingresados = activos + retirados) no tiene desglose por ciudad.`
+                    ? `Activos en la cohorte ${etiquetaCohorte}. La cohorte canónica (ingresados = activos + retirados) no tiene desglose por ciudad.`
                     : esActual
-                      ? `Activos en la cohorte ${cohorte}`
-                      : `Cohorte ${cohorte} (histórico Q10 — no incluye retirados)`
+                      ? `Activos en la cohorte ${etiquetaCohorte}`
+                      : `Cohorte ${etiquetaCohorte} (histórico Q10 — no incluye retirados)`
                 }
               />
             )}
@@ -1925,7 +2025,7 @@ export default function Pagina() {
               <Kpi
                 titulo="Cursos"
                 valor={String(cursosProg.length)}
-                detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${cohorte}`}
+                detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${etiquetaCohorte}`}
               />
             )}
               </>
@@ -1984,7 +2084,7 @@ export default function Pagina() {
           {kpis.estadoCohorteCiudad && (
             <Seccion
               titulo="Estado de la cohorte"
-              nota={`Desglose de las ${kpis.estadoCohorteCiudad.total.toLocaleString('es-CO')} matrículas de ${ETIQUETA_GRUPO[ciudadElegida ?? ''] ?? ciudadElegida} — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${cohorte}. Se aprueba con avance > 80%.`}
+              nota={`Desglose de las ${kpis.estadoCohorteCiudad.total.toLocaleString('es-CO')} matrículas de ${ETIQUETA_GRUPO[ciudadElegida ?? ''] ?? ciudadElegida} — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}. Se aprueba con avance > 80%.`}
             >
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <EstadoStat etiqueta="Aprobadas" valor={kpis.estadoCohorteCiudad.aprobadas} total={kpis.estadoCohorteCiudad.total} color={C.verde} detalle="avance > 80%" />
@@ -1999,9 +2099,9 @@ export default function Pagina() {
               titulo="Estado de la cohorte"
               nota={
                 unidadEstadoCohorte === 'matriculas'
-                  ? `Desglose de las ${kpis.estadoCohorte.total.toLocaleString('es-CO')} matrículas (inscripciones) de la cohorte completa — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${cohorte}. Se aprueba con avance > 80%.`
+                  ? `Desglose de las ${kpis.estadoCohorte.total.toLocaleString('es-CO')} matrículas (inscripciones) de la cohorte completa — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}. Se aprueba con avance > 80%.`
                   : kpis.estadoEst
-                    ? `Desglose de los ${kpis.estadoEst.total.toLocaleString('es-CO')} estudiantes (personas únicas) según su avance promedio en la cohorte. ${NOMBRE_PROGRAMA[programa]} · ${cohorte}. En promedio cada uno ha aprobado ${kpis.estadoEst.promAprobados ?? '—'} cursos.`
+                    ? `Desglose de los ${kpis.estadoEst.total.toLocaleString('es-CO')} estudiantes (personas únicas) según su avance promedio en la cohorte. ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}. En promedio cada uno ha aprobado ${kpis.estadoEst.promAprobados ?? '—'} cursos.`
                     : 'Sin datos por estudiante para esta cohorte.'
               }
             >
@@ -2062,14 +2162,14 @@ export default function Pagina() {
               trae grupo_ciudad. Con una ciudad/municipio elegido caemos al gráfico de completación. */}
           {mostrarCanonico && !hayFiltroCiudad ? (
             <Seccion
-              titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`}
+              titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}`}
               nota={`Cada barra suma la cohorte completa que cursó (${kpis.ingresados ?? '—'} ingresados en los cursos base): aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro.`}
             >
               <GraficoAprobacion datos={aprobacionProg.map(segmentosAprobacion)} />
             </Seccion>
           ) : (
             <Seccion
-              titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
+              titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
               nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}.` : "Completado = avance > 80% (mismo criterio del panel de aprobación)."}
             >
               {ciudadElegida && programa === 'mr' && (
@@ -2262,7 +2362,7 @@ export default function Pagina() {
                   <Kpi titulo="Ciudad a intervenir" valor={`${peor.retencion.toFixed(1)}%`} detalle={`${peor.etiqueta} — la más baja`} acento={C.rojo} />
                 </div>
                 <Seccion
-                  titulo={`Retención por ciudad — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
+                  titulo={`Retención por ciudad — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}`}
                   nota="Retención = activos ÷ ingresados de cada ciudad. Ordenadas de mayor a menor. Se actualiza con cada sync."
                 >
                   <GraficoBarras datos={filas} dataKey="retencion" nombre="Retención %" color={C.verde} dominioMax={100} rotarEtiquetas sufijoEtiqueta="%" decimalesEtiqueta={1} />
@@ -2379,7 +2479,7 @@ export default function Pagina() {
                 );
               })()}
               <Seccion
-                titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}${conCiudadJc ? ` · ${ciu}` : ''}`}
+                titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}${conCiudadJc ? ` · ${ciu}` : ''}`}
                 nota="Cada barra suma la cohorte completa que cursó: aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro."
               >
                 <GraficoAprobacion datos={filasCurso.map(segmentosAprobacion)} />
@@ -2422,7 +2522,7 @@ export default function Pagina() {
             </>
           ) : distribucionEst.length > 0 ? (
             <Seccion
-              titulo={`¿Cuántos cursos ha aprobado cada estudiante? — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}`}
+              titulo={`¿Cuántos cursos ha aprobado cada estudiante? — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}`}
               nota={`Distribución de los ${distribucionEst.reduce((s, d) => s + d.estudiantes, 0).toLocaleString('es-CO')} estudiantes activos por número de cursos aprobados (> 80%). Muestra cuántas personas van completas y cuántas rezagadas — no cuenta matrículas sino personas.`}
             >
               <GraficoBarras
@@ -2435,7 +2535,7 @@ export default function Pagina() {
               />
               <p className="text-xs text-slate-400 mt-2">
                 Eje horizontal = número de cursos aprobados (de {distribucionEst.length - 1} en la
-                ruta {NOMBRE_PROGRAMA[programa]} {cohorte}). Un estudiante en el extremo alto ya
+                ruta {NOMBRE_PROGRAMA[programa]} {etiquetaCohorte}). Un estudiante en el extremo alto ya
                 completó casi toda la ruta; los del extremo bajo son los que requieren
                 acompañamiento.
               </p>
@@ -2452,7 +2552,7 @@ export default function Pagina() {
       {tab === 'Cursos' && !mostrarCanonico && (
         <>
           <Seccion
-            titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${cohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
+            titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
             nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}.` : "Completado = avance > 80%."}
           >
             {ciudadElegida && programa === 'mr' && (
@@ -2644,12 +2744,12 @@ export default function Pagina() {
         return (
           <>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-              <Kpi titulo="Con emprendimiento" valor={`${pctEmprendimientoMr}%`} detalle={`${emprendeSi.toLocaleString('es-CO')} de ${totalEmprendeConDato.toLocaleString('es-CO')} con dato · ${cohorte} · ${ETIQUETA_ESTADO[estado]} (Q10)`} />
+              <Kpi titulo="Con emprendimiento" valor={`${pctEmprendimientoMr}%`} detalle={`${emprendeSi.toLocaleString('es-CO')} de ${totalEmprendeConDato.toLocaleString('es-CO')} con dato · ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]} (Q10)`} />
               <Kpi titulo="Con microcrédito" valor={creditoSi.toLocaleString('es-CO')} detalle={`${pctCreditoMr}% del universo completo`} />
               <Kpi titulo="Con dato de ingresos" valor={totalIngresosMr.toLocaleString('es-CO')} detalle="Universo completo (postulantes + matriculadas)" />
             </div>
             <div className="grid md:grid-cols-2 gap-6">
-              <Seccion titulo="Emprendimiento" nota={`Con emprendimiento = registra un emprendimiento con nombre en la BD. Solo matriculadas Q10 (${cohorte} · ${ETIQUETA_ESTADO[estado]}) — sin equivalente universo-completo (postulantes_mr no distingue "no tiene" de "sin dato" para este campo).`}>
+              <Seccion titulo="Emprendimiento" nota={`Con emprendimiento = registra un emprendimiento con nombre en la BD. Solo matriculadas Q10 (${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}) — sin equivalente universo-completo (postulantes_mr no distingue "no tiene" de "sin dato" para este campo).`}>
                 <GraficoEmprendimiento datos={emprendimientoPie} />
               </Seccion>
               <Seccion titulo="Acceso a crédito" nota="Universo completo (postulantes_mr, sin filtro de cohorte/estado/ciudad) — Microcrédito vs iCredit.">
@@ -2689,12 +2789,12 @@ export default function Pagina() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
                 <Kpi titulo="Ya emprende" valor={`${pct(enMarcha)}%`} detalle={`${enMarcha.toLocaleString('es-CO')} con emprendimiento en marcha`} />
                 <Kpi titulo="Potencial" valor={`${pct(potencial)}%`} detalle={`${potencial.toLocaleString('es-CO')} con idea o interesados`} />
-                <Kpi titulo="Diagnosticados" valor={totalDiag.toLocaleString('es-CO')} detalle={`Encuesta JC · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`} />
+                <Kpi titulo="Diagnosticados" valor={totalDiag.toLocaleString('es-CO')} detalle={`Encuesta JC · ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}`} />
               </div>
             );
           })()}
           <div className="grid md:grid-cols-2 gap-6">
-            <Seccion titulo="Situación frente al emprendimiento" nota={`Encuesta de diagnóstico Jóvenes creaTIvos · ${cohorte} · ${ETIQUETA_ESTADO[estado]}.`}>
+            <Seccion titulo="Situación frente al emprendimiento" nota={`Encuesta de diagnóstico Jóvenes creaTIvos · ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}.`}>
               <GraficoEmprendimiento datos={emprendimientoOrdenado} />
             </Seccion>
             <Seccion titulo="Cursos completados según situación" nota="Promedio de cursos completados por participante en cada grupo.">
@@ -2716,7 +2816,7 @@ export default function Pagina() {
       ) : tab === 'Demografía' ? (
         <>
           <p className="text-xs text-slate-400 mb-1">
-            {NOMBRE_PROGRAMA[programa]} · {cohorte} · {ETIQUETA_ESTADO[estado]}
+            {NOMBRE_PROGRAMA[programa]} · {etiquetaCohorte} · {ETIQUETA_ESTADO[estado]}
             {programa === 'mr' ? ' — fuente: BD-Mujeres ROFÉ.' : ' — fuente: BD de monitorias.'}
           </p>
           <div className="grid md:grid-cols-2 gap-6">
@@ -2726,7 +2826,7 @@ export default function Pagina() {
             {programa === 'mr' ? (
               <Seccion
                 titulo="Emprendimiento"
-                nota={`Con emprendimiento = registra un emprendimiento con nombre en la BD. ${totalMrConDatos.toLocaleString('es-CO')} mujeres con dato para ${cohorte} · ${ETIQUETA_ESTADO[estado]}${ciudadElegida ? ` · ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : ''} (mismo criterio de "Con emprendimiento" del tab Emprendimiento).`}
+                nota={`Con emprendimiento = registra un emprendimiento con nombre en la BD. ${totalMrConDatos.toLocaleString('es-CO')} mujeres con dato para ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}${ciudadElegida ? ` · ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : ''} (mismo criterio de "Con emprendimiento" del tab Emprendimiento).`}
               >
                 {emprendimientoBooleanoMr.length > 0 ? (
                   <GraficoEmprendimiento datos={emprendimientoBooleanoMr} />
@@ -2833,7 +2933,7 @@ export default function Pagina() {
               <Kpi
                 titulo="Asistencia promedio"
                 valor={promedioGlobal != null ? `${promedioGlobal.toFixed(1)}%` : '—'}
-                detalle={`${NOMBRE_PROGRAMA[programa]} · ${cohorte} · ${ETIQUETA_ESTADO[estado]}`}
+                detalle={`${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}`}
               />
               <Kpi titulo="Estudiantes con dato" valor={nTotal.toLocaleString('es-CO')} detalle="con registro de asistencia Zoom validada" />
               {peorCiudad && (
@@ -2900,7 +3000,7 @@ export default function Pagina() {
           <NotaFiltros
             inaplicables={[
               ...(estado !== 'retirados' ? ['Estado (arriba) para Activos/Todos — usá el selector de alcance de esta pestaña'] : []),
-              ...(!esActual ? [`Cohorte — Emoflow no distingue cohorte, siempre muestra la foto vigente aunque arriba esté elegida "${cohorte}"`] : []),
+              ...(!esActual ? [`Cohorte — Emoflow no distingue cohorte, siempre muestra la foto vigente aunque arriba esté elegida "${etiquetaCohorte}"`] : []),
             ]}
           />
 
