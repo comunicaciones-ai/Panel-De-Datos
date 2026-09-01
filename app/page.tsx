@@ -143,13 +143,21 @@ const HISTORICO_Q10_MR: AnioHistoricoMr[] = [
       { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: 235, iniciados: 67, completados: 29 },
     ],
   },
+  // 2025: UNIÓN de 3 fuentes (Consolidado oficial + 8 archivos "Astrid" en
+  // Downloads/DATOS 2025 + Q10 directo vía Supabase, cruzados por cédula real), quedándose
+  // con el valor MÁS GRANDE por curso x métrica (pedido explícito 2026-09-01: "no sabemos
+  // qué discriminar, toda información nos es de utilidad"). `inscritas` no cambió en ningún
+  // curso (el oficial ya era el máximo); `iniciados`/`completados` sí subieron donde la unión
+  // real de personas (Astrid ∪ Supabase, resuelta por cédula) superó al oficial -- ver
+  // tools/unir_fuentes_2025.py. Es un PISO, no un dato auditado: cada fuente mide con un
+  // criterio propio, unir así no reconcilia el porqué difieren, solo evita subestimar.
   {
     anio: '2025', bd: 4712, cursos: [
-      { nombre: 'Habilidades Clave para Emprender con Propósito', inscritas: 268, iniciados: 80, completados: 32 },
-      { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 334, iniciados: 84, completados: 34 },
+      { nombre: 'Habilidades Clave para Emprender con Propósito', inscritas: 268, iniciados: 80, completados: 43 },
+      { nombre: 'De la idea a la acción, tu guía para emprender con éxito', inscritas: 334, iniciados: 85, completados: 43 },
       { nombre: 'Finanzas inteligentes, gestión para emprendedoras', inscritas: 155, iniciados: 83, completados: 41 },
-      { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: 108, iniciados: 36, completados: 25 },
-      { nombre: 'Empoderamiento en Ventas: Lleva tu Negocio al Siguiente Nivel', inscritas: 182, iniciados: 68, completados: 60 },
+      { nombre: 'Transforma tu negocio con estrategias digitales', inscritas: 108, iniciados: 47, completados: 32 },
+      { nombre: 'Empoderamiento en Ventas: Lleva tu Negocio al Siguiente Nivel', inscritas: 182, iniciados: 70, completados: 60 },
     ],
   },
   {
@@ -1646,7 +1654,10 @@ export default function Pagina() {
                 'Dato oficial hasta 2026 (informe Excel de Samuel) — desde 2027 el seguimiento Q10 pasa a ser completo y auditado en vivo, ver ADR. ' +
                 (marcoFormacionMr === 'inscritas'
                   ? '% de la tabla = completaron ÷ se inscribieron (incluye a quien nunca entró a la plataforma).'
-                  : '% de la tabla = completaron ÷ SÍ llegaron a Bienvenida (excluye a quien nunca entró).')
+                  : '% de la tabla = completaron ÷ SÍ llegaron a Bienvenida (excluye a quien nunca entró).') +
+                (anioSel?.anio === '2025'
+                  ? ' 2025 en particular: "Iniciaron"/"Completados" son la unión de 3 fuentes (informe oficial + archivos descargados de Q10 por curso + Supabase), quedándose con el valor más grande de cada una por curso — un piso, no una cifra auditada.'
+                  : '')
               }
             >
               {(!anioSel || (anioSel.anio !== '2025' && anioSel.anio !== '2026')) && (
