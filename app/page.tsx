@@ -1014,13 +1014,17 @@ export default function Pagina() {
   }, [emoflowKpis, ciudadElegida, ultimoDiaEmoflow]);
 
   // Aprobación canónica de la cohorte (cursaron = activos + retirados) por programa
-  const aprobacionProg = useMemo(
-    () =>
-      datos
-        ? datos.aprobacion.filter((a) => a.programa === programa && (esMrTodos || a.cohorte === cohorte))
-        : [],
-    [datos, programa, cohorte, esMrTodos],
-  );
+  const aprobacionProg = useMemo(() => {
+    if (!datos) return [];
+    const filas = datos.aprobacion.filter(
+      (a) => a.programa === programa && (esMrTodos || a.cohorte === cohorte),
+    );
+    // Bienvenida es el primer curso que ven las y los estudiantes (JC) — se muestra siempre
+    // de primero en el gráfico, aunque el resto quede ordenado por tamaño de cohorte
+    // (cursaron.desc, ya viene así de la API). Pedido de Samuel 2026-09-07.
+    const esBienvenida = (a: (typeof filas)[number]) => /bienvenid/i.test(a.curso);
+    return [...filas.filter(esBienvenida), ...filas.filter((a) => !esBienvenida(a))];
+  }, [datos, programa, cohorte, esMrTodos]);
 
   // Única decisión de qué vista de Cursos usar (§1.2 del diagnóstico: antes se calculaba dos
   // veces, en Resumen y en Cursos, con riesgo de desalinearse). Se consume igual en ambos tabs.
