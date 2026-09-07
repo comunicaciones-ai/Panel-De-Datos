@@ -1306,6 +1306,13 @@ export default function Pagina() {
       ingresados: hayFiltroCiudad ? null : ing?.ingresados ?? null,
       activos: ing?.activos ?? null,
       retirados: ing?.retirados ?? null,
+      // Retención/Deserción de la cohorte VIGENTE de JC (pedido de Samuel 2026-09-07): usar el
+      // activo EN VIVO (Seguimiento, mismo que el KPI "Actuales"/actualesGeo) contra el canon
+      // ingresados (832), no cohorte_ingresos.activos (canon, se actualiza por sync y se atrasa
+      // frente a los retiros del día). Antes esta casilla mostraba 88.9% (740/832, canon) mientras
+      // "Actuales" ya mostraba 726 — dos números de activos distintos en la misma pantalla. Fuera
+      // de ese caso (cohortes cerradas, MR, con filtro de ciudad) se conserva el canon de siempre.
+      activosRetencion: usarActualesSeguimiento ? actualesGeo : (ing?.activos ?? null),
     };
   }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, esMrTodos, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
 
@@ -2074,11 +2081,24 @@ export default function Pagina() {
             )}
             {/* Retención y Deserción — las dos métricas clave, como par de casillas verde/roja.
                 Sin filtro de ciudad → cifras de la cohorte (canon). Con una ciudad elegida → las
-                MISMAS casillas pero de esa ciudad (v_pub_retencion_ciudad), pedido de Samuel. */}
-            {kpis.ingresados != null && kpis.activos != null && kpis.retirados != null ? (
+                MISMAS casillas pero de esa ciudad (v_pub_retencion_ciudad), pedido de Samuel.
+                JC vigente (usarActualesSeguimiento): activos EN VIVO (mismo Seguimiento que
+                "Actuales") sobre el ingresados canon (832) — no cohorte_ingresos.activos, que se
+                atrasa frente al retiro del día (pedido de Samuel 2026-09-07). */}
+            {kpis.ingresados != null && kpis.activosRetencion != null ? (
               <>
-                <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * kpis.activos) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.verde} />
-                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * kpis.retirados) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.rojo} />
+                <Kpi
+                  titulo="Retención"
+                  valor={`${((100 * kpis.activosRetencion) / kpis.ingresados).toFixed(1)}%`}
+                  detalle={kpis.usarActualesSeguimiento ? `${kpis.activosRetencion} activos ahora ÷ ${kpis.ingresados} ingresados (canon)` : undefined}
+                  acento={C.verde}
+                />
+                <Kpi
+                  titulo="Deserción"
+                  valor={`${(100 - (100 * kpis.activosRetencion) / kpis.ingresados).toFixed(1)}%`}
+                  detalle={kpis.usarActualesSeguimiento ? 'Incluye retiros aún sin confirmar en el canon' : undefined}
+                  acento={C.rojo}
+                />
               </>
             ) : ciudadElegida && retencionPorCiudad.mapa.get(ciudadElegida) ? (() => {
               const rc = retencionPorCiudad.mapa.get(ciudadElegida)!;
