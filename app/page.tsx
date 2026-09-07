@@ -1053,13 +1053,13 @@ export default function Pagina() {
   // Verificación cruzada: misma forma que aprobacion_cursos pero recalculada desde
   // enrollments + en_seguimiento_jc, para detectar si el pipeline oficial de Q10 se
   // desincroniza de Supabase (como pasó el 2026-07-23 con un sync atrasado).
-  const aprobacionAjustadaProg = useMemo(
-    () =>
-      datos && programa === 'jc'
-        ? datos.aprobacionAjustada.filter((a) => a.cohorte === cohorte)
-        : [],
-    [datos, programa, cohorte],
-  );
+  const aprobacionAjustadaProg = useMemo(() => {
+    if (!datos || programa !== 'jc') return [];
+    const filas = datos.aprobacionAjustada.filter((a) => a.cohorte === cohorte);
+    // Bienvenida siempre de primero en la tabla, mismo criterio que aprobacionProg arriba.
+    const esBienvenida = (a: (typeof filas)[number]) => /bienvenid/i.test(a.curso);
+    return [...filas.filter(esBienvenida), ...filas.filter((a) => !esBienvenida(a))];
+  }, [datos, programa, cohorte]);
 
   // Distribución de estudiantes por # de cursos aprobados (histograma). Se rellenan los huecos
   // (0..max) para que el eje sea continuo y muestre honestamente los tramos sin nadie.
