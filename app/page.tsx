@@ -2400,9 +2400,17 @@ export default function Pagina() {
           }))
           .sort((a, b) => b.retencion - a.retencion);
         const ciudadDisponible = esActual && filas.length > 0;
+        // v_pub_retencion_ciudad.activos ya es en vivo (en_seguimiento_jc, misma fuente que
+        // v_pub_geografia/"Actuales" del Resumen — verificado: suma exacto igual, 726 en JC 2026).
+        // Pero Σingresados por ciudad (818) es MENOR al canon (832): ~14 personas sin
+        // grupo_ciudad asignado quedan fuera del desglose por ciudad y le faltan al denominador.
+        // "Retención (cohorte)" debe leerse igual que el Resumen (activos en vivo ÷ canon 832),
+        // no activos-con-ciudad ÷ ingresados-con-ciudad — si no, esta casilla y el Resumen
+        // muestran dos números distintos para la misma cohorte (pedido de Samuel).
         const totalIng = filas.reduce((s, f) => s + f.ingresados, 0);
         const totalAct = filas.reduce((s, f) => s + f.activos, 0);
-        const retGlobal = totalIng ? (100 * totalAct) / totalIng : 0;
+        const ingCanon = ingresosProg?.ingresados;
+        const retGlobal = ingCanon ? (100 * totalAct) / ingCanon : totalIng ? (100 * totalAct) / totalIng : 0;
         const mejor = filas[0];
         const peor = filas[filas.length - 1];
 
