@@ -1049,6 +1049,31 @@ export default function Pagina() {
       a.cursaron != null,
   );
 
+  // Completación por ciudad + Estado para JC vigente. v_curso_completion_por_ciudad es un
+  // agregado de activas; cuando el usuario elige Todos/Retirados hay que reconstruir las barras
+  // desde v_pub_aprobacion_ciudad_jc, que conserva los cuatro segmentos por curso.
+  const cursosPorCiudadEstado = useMemo(
+    (): Array<{ curso: string | null; matriculados: number; completados: number }> => {
+      if (!ciudadElegida || programa !== 'jc' || estado === 'activos') {
+        return cursosPorCiudadFiltrados.map((c) => ({
+          curso: c.curso ?? null,
+          matriculados: Number(c.matriculados ?? 0),
+          completados: Number(c.completados ?? 0),
+        }));
+      }
+      return aprobacionCiudadConDato.map((a) => {
+        const matriculados = estado === 'retirados'
+          ? a.retirados + a.aprobados_retirados
+          : a.cursaron;
+        const completados = estado === 'retirados'
+          ? a.aprobados_retirados
+          : (a.aprobados_total ?? a.aprobados + a.aprobados_retirados);
+        return { curso: a.curso, matriculados, completados };
+      });
+    },
+    [ciudadElegida, programa, estado, cursosPorCiudadFiltrados, aprobacionCiudadConDato],
+  );
+
 
   // Verificación cruzada: misma forma que aprobacion_cursos pero recalculada desde
   // enrollments + en_seguimiento_jc, para detectar si el pipeline oficial de Q10 se
@@ -1203,9 +1228,52 @@ export default function Pagina() {
     // no confiable todavía). El KPI cae solo al de "Cursos" ya previsto más abajo.
     let edadProm = estado === 'activos' && co?.edad_promedio ? Number(co.edad_promedio).toFixed(1) : '—';
 
-    if (hayFiltroCiudad && geografiaResumen) {
-      // v_pub_geografia cubre ambos programas — reemplaza al viejo statsProgramaPorCiudad
-      // (JC-only), que no tenía cómo filtrar a Mujeres ROFÉ.
+    const retencionCiudadSeleccionada = hayFiltroCiudad
+      ? retencionPorCiudad.mapa.get(ciudadElegida ?? '')
+      : undefined;
+
+    if (hayFiltroCiudad && esActual && retencionCiudadSeleccionada) {
+      // v_pub_geografia solo publica el universo JC/MR activo. Antes se reutilizaba para
+      // Estado=Todos/Retirados y el panel mostraba, por ejemplo, 122 activas en Bogotá al
+      // seleccionar Retirados. Para la cohorte vigente, v_pub_retencion_ciudad es el canon
+      // de personas por Estado/Ciudad y v_pub_aprobacion_ciudad_jc el de matrículas por curso.
+      const personasCiudad = estado === 'activos'
+        ? retencionCiudadSeleccionada.activos
+        : estado === 'retirados'
+          ? retencionCiudadSeleccionada.retirados
+          : retencionCiudadSeleccionada.ingresados;
+      participantes = personasCiudad;
+
+      if (programa === 'jc' && aprobacionCiudadConDato.length > 0) {
+        const porEstado = (a: typeof aprobacionCiudadConDato[number]) =>
+          estado === 'activos'
+            ? { total: a.activos, aprobadas: a.aprobados }
+            : estado === 'retirados'
+              ? { total: a.retirados + a.aprobados_retirados, aprobadas: a.aprobados_retirados }
+              : { total: a.cursaron, aprobadas: a.aprobados_total ?? a.aprobados + a.aprobados_retirados };
+        matriculas = aprobacionCiudadConDato.reduce((s, a) => s + porEstado(a).total, 0);
+        completadas = aprobacionCiudadConDato.reduce((s, a) => s + porEstado(a).aprobadas, 0);
+        // La vista por ciudad solo publica promedio de avance de activas; no reciclarlo para
+        // Todos/Retirados como si fuera el promedio del segmento elegido.
+        promedio = estado === 'activos'
+          ? (() => {
+              const suma = aprobacionCiudadConDato.reduce(
+                (s, a) => s + Number(a.promedio ?? 0) * a.activos, 0,
+              );
+              return matriculas ? `${(suma / matriculas).toFixed(1)}%` : '—';
+            })()
+          : '—';
+      } else if (estado !== 'activos') {
+        // MR no tiene todavía una vista de completación por ciudad y Estado. No mostrar el
+        // agregado activo como si fuera Retirados/Todos: el bloque visible de abajo explica
+        // la limitación.
+        matriculas = 0;
+        completadas = 0;
+        promedio = '—';
+      }
+    } else if (hayFiltroCiudad && estado === 'activos' && geografiaResumen) {
+      // Cohortes/programas sin canon de retención por ciudad: mantener el dato geográfico
+      // activo existente, pero no reutilizarlo para segmentos de Estado distintos.
       participantes = geografiaResumen.personas;
       completadas = geografiaResumen.aprobados;
       matriculas = geografiaResumen.personas;
@@ -1284,13 +1352,19 @@ export default function Pagina() {
     // Filtro "Estado": cambia qué número es EL número principal (§2.1.3).
     const cifraEstado = !ing
       ? null
-      : estado === 'activos'
-        ? usarActualesSeguimiento
-          ? actualesGeo
-          : ing.activos
-        : estado === 'retirados'
-          ? ing.retirados
-          : ing.ingresados;
+      : hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+        ? estado === 'activos'
+          ? retencionCiudadSeleccionada.activos
+          : estado === 'retirados'
+            ? retencionCiudadSeleccionada.retirados
+            : retencionCiudadSeleccionada.ingresados
+        : estado === 'activos'
+          ? usarActualesSeguimiento
+            ? actualesGeo
+            : ing.activos
+          : estado === 'retirados'
+            ? ing.retirados
+            : ing.ingresados;
 
     return {
       participantes,
@@ -1307,18 +1381,26 @@ export default function Pagina() {
       cifraEstado,
       usarActualesSeguimiento,
       actualesGeo,
-      ingresados: hayFiltroCiudad ? null : ing?.ingresados ?? null,
-      activos: ing?.activos ?? null,
-      retirados: ing?.retirados ?? null,
+      ingresados: hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+        ? retencionCiudadSeleccionada.ingresados
+        : hayFiltroCiudad ? null : ing?.ingresados ?? null,
+      activos: hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+        ? retencionCiudadSeleccionada.activos
+        : ing?.activos ?? null,
+      retirados: hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+        ? retencionCiudadSeleccionada.retirados
+        : ing?.retirados ?? null,
       // Retención/Deserción de la cohorte VIGENTE de JC (pedido de Samuel 2026-09-07): usar el
       // activo EN VIVO (Seguimiento, mismo que el KPI "Actuales"/actualesGeo) contra el canon
       // ingresados (832), no cohorte_ingresos.activos (canon, se actualiza por sync y se atrasa
       // frente a los retiros del día). Antes esta casilla mostraba 88.9% (740/832, canon) mientras
       // "Actuales" ya mostraba 726 — dos números de activos distintos en la misma pantalla. Fuera
       // de ese caso (cohortes cerradas, MR, con filtro de ciudad) se conserva el canon de siempre.
-      activosRetencion: usarActualesSeguimiento ? actualesGeo : (ing?.activos ?? null),
+      activosRetencion: hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+        ? retencionCiudadSeleccionada.activos
+        : usarActualesSeguimiento ? actualesGeo : (ing?.activos ?? null),
     };
-  }, [datos, programa, cohorte, estado, hayFiltroCiudad, geografiaResumen, esActual, esMrTodos, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
+  }, [datos, programa, cohorte, estado, hayFiltroCiudad, ciudadElegida, geografiaResumen, retencionPorCiudad, esActual, esMrTodos, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
 
   // Retención y Asistencia se quitaron del tab bar de MR (pedido 2026-08-27, tras la
   // auditoría de 2 agentes): miden procesos que MR no tiene estructurados de la misma forma
@@ -1958,6 +2040,13 @@ export default function Pagina() {
               </button>
               {gruposGeografia.map(({ grupo, total }) => {
                 const ret = retencionPorCiudad.mapa.get(grupo);
+                const totalEstado = ret
+                  ? estado === 'activos'
+                    ? ret.activos
+                    : estado === 'retirados'
+                      ? ret.retirados
+                      : ret.ingresados
+                  : total;
                 return (
                 <button
                   key={grupo}
@@ -1966,7 +2055,7 @@ export default function Pagina() {
                     ciudadElegida === grupo ? 'pill-metal pill-metal-naranja' : 'text-slate-600 hover:bg-slate-100'
                   }`}
                 >
-                  {ETIQUETA_GRUPO[grupo] ?? grupo} · {total}
+                  {ETIQUETA_GRUPO[grupo] ?? grupo} · {totalEstado}
                   {ret != null && (
                     <span className="font-bold" style={{ color: colorRetencion(ret.pct) }}> · {ret.pct}%</span>
                   )}
@@ -1976,7 +2065,7 @@ export default function Pagina() {
             </div>
             {retencionPorCiudad.total != null && (
               <p className="text-[11px] text-slate-400 px-1">
-                Cada ciudad: <b>personas activas</b> · <b style={{ color: C.verde }}>% retención</b> (verde ≥90 · ámbar ≥80 · rojo &lt;80).
+                Cada ciudad: <b>personas {ETIQUETA_ESTADO[estado].toLowerCase()}</b> · <b style={{ color: C.verde }}>% retención</b> (verde ≥90 · ámbar ≥80 · rojo &lt;80).
               </p>
             )}
             {/* Solo en Resumen (auditoría 2026-08-26): ninguna otra pestaña tiene datos con
@@ -2194,7 +2283,7 @@ export default function Pagina() {
           {kpis.estadoCohorteCiudad && (
             <Seccion
               titulo="Estado de la cohorte"
-              nota={`Desglose de las ${kpis.estadoCohorteCiudad.total.toLocaleString('es-CO')} matrículas de ${ETIQUETA_GRUPO[ciudadElegida ?? ''] ?? ciudadElegida} — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}. Se aprueba con avance > 80%.`}
+              nota={`Desglose completo de las ${kpis.estadoCohorteCiudad.total.toLocaleString('es-CO')} matrículas de ${ETIQUETA_GRUPO[ciudadElegida ?? ''] ?? ciudadElegida} — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}. Se aprueba con avance > 80%. Este bloque conserva todos los estados; el filtro Estado sí se aplica al KPI y a Completación por curso.`}
             >
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <EstadoStat etiqueta="Aprobadas" valor={kpis.estadoCohorteCiudad.aprobadas} total={kpis.estadoCohorteCiudad.total} color={C.verde} detalle="avance > 80%" />
@@ -2209,9 +2298,9 @@ export default function Pagina() {
               titulo="Estado de la cohorte"
               nota={
                 unidadEstadoCohorte === 'matriculas'
-                  ? `Desglose de las ${kpis.estadoCohorte.total.toLocaleString('es-CO')} matrículas (inscripciones) de la cohorte completa — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}. Se aprueba con avance > 80%.`
+                  ? `Desglose completo de las ${kpis.estadoCohorte.total.toLocaleString('es-CO')} matrículas (inscripciones) de la cohorte — una persona cuenta en cada curso. ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}. Se aprueba con avance > 80%. Este bloque conserva todos los estados; el filtro Estado sí se aplica al gráfico de arriba.`
                   : kpis.estadoEst
-                    ? `Desglose de los ${kpis.estadoEst.total.toLocaleString('es-CO')} estudiantes (personas únicas) según su avance promedio en la cohorte. ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}. En promedio cada uno ha aprobado ${kpis.estadoEst.promAprobados ?? '—'} cursos.`
+                    ? `Desglose completo de los ${kpis.estadoEst.total.toLocaleString('es-CO')} estudiantes (personas únicas) según su avance promedio en la cohorte. ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}. En promedio cada uno ha aprobado ${kpis.estadoEst.promAprobados ?? '—'} cursos. Este bloque conserva todos los estados; el filtro Estado sí se aplica al gráfico de arriba.`
                     : 'Sin datos por estudiante para esta cohorte.'
               }
             >
@@ -2258,12 +2347,20 @@ export default function Pagina() {
               )}
             </Seccion>
           )}
-          {esActual && geografiaResumen && ciudadElegida && (
+          {esActual && geografiaResumen && ciudadElegida && estado === 'activos' && (
             <Seccion titulo={`${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}${municipioElegido ? ` · ${municipioElegido}` : ''}`}>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                 <EstadoStat etiqueta="Personas" valor={geografiaResumen.personas} total={geografiaResumen.personas} color={C.azul2} detalle="en esta selección" />
                 <EstadoStat etiqueta="Al día" valor={geografiaResumen.aprobados} total={geografiaResumen.personas} color={C.verde} detalle="avance > 80%" />
               </div>
+            </Seccion>
+          )}
+          {esActual && ciudadElegida && estado !== 'activos' && (
+            <Seccion
+              titulo={`${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida} · ${ETIQUETA_ESTADO[estado]}`}
+              nota="El detalle geográfico de avance individual solo está publicado para Activos. El KPI y la completación por curso de arriba sí respetan el Estado seleccionado; no se reutiliza el agregado activo para Retirados/Todos."
+            >
+              <NoAplica motivo="avance individual por ciudad no disponible para este Estado." suave />
             </Seccion>
           )}
           {/* El panel "Retiro probable" se retiró a pedido de Samuel (2026-08-13): info no
@@ -2280,7 +2377,7 @@ export default function Pagina() {
           ) : (
             <Seccion
               titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
-              nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}.` : "Completado = avance > 80% (mismo criterio del panel de aprobación)."}
+              nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida} · ${ETIQUETA_ESTADO[estado].toLowerCase()}.` : "Completado = avance > 80% (mismo criterio del panel de aprobación)."}
             >
               {ciudadElegida && programa === 'mr' && (
                 <p className="text-xs text-slate-400 mb-2">
@@ -2289,7 +2386,7 @@ export default function Pagina() {
               )}
               <GraficoCursos
                 datos={ciudadElegida
-                  ? cursosPorCiudadFiltrados.map((c) => ({
+                  ? cursosPorCiudadEstado.map((c) => ({
                       curso: c.curso ?? '(sin nombre)',
                       completados: Number(c.completados ?? 0),
                       en_progreso: Math.max(0, Number(c.matriculados ?? 0) - Number(c.completados ?? 0)),
@@ -2641,7 +2738,7 @@ export default function Pagina() {
           ) : distribucionEst.length > 0 ? (
             <Seccion
               titulo={`¿Cuántos cursos ha aprobado cada estudiante? — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}`}
-              nota={`Distribución de los ${distribucionEst.reduce((s, d) => s + d.estudiantes, 0).toLocaleString('es-CO')} estudiantes activos por número de cursos aprobados (> 80%). Muestra cuántas personas van completas y cuántas rezagadas — no cuenta matrículas sino personas.`}
+              nota={`Distribución de los ${distribucionEst.reduce((s, d) => s + d.estudiantes, 0).toLocaleString('es-CO')} estudiantes activos por número de cursos aprobados (> 80%). Muestra cuántas personas van completas y cuántas rezagadas — no cuenta matrículas sino personas. Esta vista es nacional: Ciudad no aplica aquí; se muestra solo para Activos.`}
             >
               <GraficoBarras
                 datos={distribucionEst}
@@ -2671,7 +2768,7 @@ export default function Pagina() {
         <>
           <Seccion
             titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
-            nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}.` : "Completado = avance > 80%."}
+            nota={ciudadElegida ? `Completado = avance > 80%. Datos filtrados para ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida} · ${ETIQUETA_ESTADO[estado].toLowerCase()}.` : "Completado = avance > 80%."}
           >
             {ciudadElegida && programa === 'mr' && (
               <p className="text-xs text-slate-400 mb-2">
@@ -2711,7 +2808,7 @@ export default function Pagina() {
             )}
             <GraficoCursos
               datos={ciudadElegida
-                ? cursosPorCiudadFiltrados.map((c) => ({
+                ? cursosPorCiudadEstado.map((c) => ({
                     curso: c.curso ?? '(sin nombre)',
                     completados: Number(c.completados ?? 0),
                     en_progreso: Math.max(0, Number(c.matriculados ?? 0) - Number(c.completados ?? 0)),
