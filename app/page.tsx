@@ -64,6 +64,25 @@ const ETIQUETA_DIMENSION: Record<string, string> = {
   tipo_vivienda: 'Tipo de vivienda',
 };
 
+const ETIQUETA_SEGMENTO_POBLACIONAL: Record<string, string> = {
+  victima_conflicto: 'Víctima del conflicto armado',
+  lgbtiq: 'Población LGBTIQ+',
+  afrodescendiente: 'Afrodescendiente',
+  palenquero_raizal: 'Palenquera/o o raizal',
+  pueblos_indigenas: 'Pueblos indígenas',
+  rrom: 'Pueblo Rrom o gitano',
+  discapacidad: 'Condición de discapacidad',
+  migrante: 'Persona migrante',
+  retornado: 'Persona retornada',
+  campesina: 'Persona campesina',
+  madre_o_padre: 'Madre/padre o adolescente a cargo',
+  gestante: 'Persona gestante',
+  rural: 'Población rural',
+  ninguna: 'Ninguna de las anteriores',
+  no_respondio: 'No respondió',
+  sin_clasificar: 'Sin clasificar',
+};
+
 // Orden de edad para JC (v_pub_demografia no trae una columna de orden numérico para esta
 // dimensión — a diferencia de ORDEN_MR, que ya cubre el rango MR). Puramente de presentación,
 // no requiere SQL nuevo.
@@ -356,7 +375,7 @@ function NotaFiltros({ inaplicables }: { inaplicables: string[] }) {
 // Suma `total` (respeta null = celda suprimida por k-anonimato, se ignora en vez de contarla
 // como 0) por categoria, para una dimension de v_pub_demografia ya filtrada por
 // programa/cohorte/estado/ciudad.
-function agregarPorCategoria(filas: PubDemografia[], dimension: string) {
+function agregarPorCategoria(filas: Array<{ dimension: string; categoria: string; total: number | null }>, dimension: string) {
   const mapa = new Map<string, number>();
   filas
     .filter((f) => f.dimension === dimension && f.total != null)
@@ -697,6 +716,17 @@ export default function Pagina() {
         (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
     );
   }, [datos, programa, cohorte, estado, ciudadElegida, esMrTodos]);
+
+  const segmentoPoblacionalFiltrado = useMemo(() => {
+    if (!datos || programa !== 'jc') return [];
+    return datos.segmentoPoblacional.filter(
+      (d) =>
+        d.programa === 'jc' &&
+        d.cohorte === cohorte &&
+        (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
+        (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
+    );
+  }, [datos, programa, cohorte, estado, ciudadElegida]);
 
   // "No aplica" (estructural, por programa) vs. "sin datos" (el filtro vigente no tiene
   // filas) para cada dimensión — se evalúa sobre TODO el dataset del programa, ignorando el
@@ -1543,6 +1573,31 @@ export default function Pagina() {
       <Seccion titulo={ETIQUETA_DIMENSION[dimension]} nota={dimension === 'edad_rango' ? 'En rangos — nunca edades individuales.' : undefined}>
         <PuntoSinDato cantidad={sinDato} />
         <GraficoBarras datos={filas} dataKey="total" nombre="Personas" color={C.azul2} />
+      </Seccion>
+    );
+  }
+
+  function TarjetaSegmentoPoblacional() {
+    const mapa = agregarPorCategoria(segmentoPoblacionalFiltrado, 'segmento_poblacional');
+    if (mapa.size === 0) {
+      return (
+        <Seccion titulo="Segmento poblacional">
+          <NoAplica motivo="sin datos para este filtro (cohorte/estado/ciudad elegidos)." suave />
+        </Seccion>
+      );
+    }
+    const filas = Array.from(mapa.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([categoria, total]) => ({
+        etiqueta: ETIQUETA_SEGMENTO_POBLACIONAL[categoria] ?? categoria,
+        total,
+      }));
+    return (
+      <Seccion
+        titulo="Segmento poblacional"
+        nota={`Respuestas de la convocatoria Fase 1 · ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}${ciudadElegida ? ` · ${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida}` : ''}. Una persona puede seleccionar más de una categoría: los conteos no son excluyentes ni deben sumar 100%. “Ninguna”, “No respondió” y “Sin clasificar” son estados de respuesta; esta última reúne textos fuera de la taxonomía canónica. Celdas con menos de 5 personas se ocultan por privacidad.`}
+      >
+        <GraficoBarras datos={filas} dataKey="total" nombre="Personas" color={C.azul2} etiquetaKey="etiqueta" />
       </Seccion>
     );
   }
@@ -3055,10 +3110,13 @@ export default function Pagina() {
       )}
 
       {tab === 'Demografía' && estado === 'retirados' ? (
-        // Demografía por RETIRADOS: el equipo juzga esta fuente poco confiable para el segmento de
-        // retirados (cobertura sociodemográfica parcial de quienes ya salieron) → se marca en
-        // construcción en vez de mostrar barras que no representan al universo de retiros del canon.
-        <EnConstruccion detalle="La demografía del segmento Retirados aún se está trabajando: la información sociodemográfica de quienes ya salieron del programa es parcial y todavía no representa de forma fiable al total de retiros. Para el desglose demográfico usá el filtro Activos o Todos." />
+        // Demografía por RETIRADOS: las dimensiones sociodemográficas siguen marcadas como
+        // construcción, pero el segmento poblacional viene de la convocatoria y sí tiene fuente
+        // para este estado; no ocultarlo detrás del aviso general.
+        <>
+          <EnConstruccion detalle="La demografía sociodemográfica del segmento Retirados aún se está trabajando: esa cobertura es parcial y todavía no representa de forma fiable al total de retiros del canon. El segmento poblacional de la convocatoria se muestra abajo con su propia fuente." />
+          {programa === 'jc' && <div className="mt-6"><TarjetaSegmentoPoblacional /></div>}
+        </>
       ) : tab === 'Demografía' ? (
         <>
           <p className="text-xs text-slate-400 mb-1">
@@ -3086,6 +3144,7 @@ export default function Pagina() {
               </Seccion>
             )}
           </div>
+          {programa === 'jc' && <div className="mt-6"><TarjetaSegmentoPoblacional /></div>}
 
           {/* Universo COMPLETO de Mujeres ROFÉ, sin discriminar por Q10 (v_pub_mr_demografia_
               universo + v_pub_mr_formacion_universo, migración 056) — pedido 2026-08-27 tras
