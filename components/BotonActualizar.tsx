@@ -10,7 +10,7 @@ import { WEBHOOK_RERUN } from '@/lib/api';
 // clave del webhook (x-rerun-key) NO viaja en el bundle: la escribe el usuario una vez y se guarda
 // en localStorage de su navegador. Solo quien conozca la clave puede disparar el sync.
 //
-// El sync corre en el PC de Samuel (8 scripts) y puede tardar 1-3 min; la respuesta HTTP llega al
+// El sync corre en el droplet (n8n.tocaunavida.org, 8 scripts; no depende del PC de Samuel) y puede tardar 1-3 min; la respuesta HTTP llega al
 // terminar. onDone() se llama al éxito para re-leer los datos del panel.
 
 const LS_KEY = 'rofe_rerun_key';
@@ -39,7 +39,7 @@ export function BotonActualizar({ onDone }: { onDone?: () => void }) {
 
   async function disparar(clave: string) {
     setEstado('corriendo');
-    setMensaje('Actualizando… corre en el PC y puede tardar 1-3 min.');
+    setMensaje('Actualizando… corre en el servidor y puede tardar 1-3 min.');
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
     try {
@@ -48,7 +48,6 @@ export function BotonActualizar({ onDone }: { onDone?: () => void }) {
         headers: {
           'content-type': 'application/json',
           'x-rerun-key': clave,
-          'ngrok-skip-browser-warning': 'true',
         },
         body: JSON.stringify({ target: TARGET }),
         signal: ctrl.signal,
