@@ -863,6 +863,111 @@ export default function Pagina() {
     };
   });
 
+  // Género de TODOS los años (v_pub_demografia_genero_total, migración 095). No se suma
+  // v_pub_demografia en el navegador: su supresión n<5 es por ciudad y borraría "Otros". La fila
+  // 'todos' cuenta PERSONAS ÚNICAS (quien estuvo en varios años cuenta una vez); las filas por año
+  // cuentan matrículas-persona de esa cohorte, así que no suman al total.
+  function GeneroTodosLosAnios() {
+    const CATS = [
+      { cat: 'Femenino', etiqueta: 'Mujeres', color: C.naranja },
+      { cat: 'Masculino', etiqueta: 'Hombres', color: C.azul2 },
+      { cat: 'Otros', etiqueta: 'Otros', color: C.amarillo },
+    ] as const;
+    const filas = (datos?.generoTotal ?? []).filter(
+      (f) =>
+        f.programa === programa &&
+        (estado === 'todos' || f.estado === (estado === 'activos' ? 'activo' : 'retirado')),
+    );
+    if (filas.length === 0) {
+      return (
+        <Seccion titulo="Género — todos los años">
+          <NoAplica motivo="la vista de totales históricos todavía no está disponible (pendiente aplicar la migración 095 en Supabase)." suave />
+        </Seccion>
+      );
+    }
+    const resumen = (coh: string) => {
+      const delCoh = filas.filter((f) => f.cohorte === coh);
+      const denominadores = new Map<string, number>();
+      delCoh.forEach((f) => denominadores.set(f.estado, f.total_cohorte));
+      const denom = Array.from(denominadores.values()).reduce((a, b) => a + b, 0);
+      const porCat = CATS.map(({ cat }) => {
+        const r = delCoh.filter((f) => f.categoria === cat);
+        return {
+          n: r.reduce((a, f) => a + (f.total ?? 0), 0),
+          suprimido: r.some((f) => f.total == null),
+        };
+      });
+      return { denom, porCat };
+    };
+    const anios = Array.from(new Set(filas.map((f) => f.cohorte)))
+      .filter((c) => /^\d{4}$/.test(c))
+      .sort();
+    const total = resumen('todos');
+    const celda = (n: number, suprimido: boolean, denom: number) => {
+      if (suprimido) return '< 5';
+      if (!denom) return '—';
+      return `${((100 * n) / denom).toFixed(1)}% (${n.toLocaleString('es-CO')})`;
+    };
+    return (
+      <Seccion
+        titulo="Género — todos los años"
+        nota={`Personas únicas de ${NOMBRE_PROGRAMA[programa]} en todas las cohortes · ${ETIQUETA_ESTADO[estado]}${ciudadElegida ? ' · no se filtra por ciudad (el total histórico es nacional)' : ''}. "Otros" agrupa otras identidades de género; "< 5" = grupo muy pequeño, oculto por privacidad.`}
+      >
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+          {CATS.map(({ etiqueta, color }, i) => (
+            <Kpi
+              key={etiqueta}
+              titulo={etiqueta}
+              valor={
+                total.porCat[i].suprimido
+                  ? '< 5'
+                  : total.denom
+                    ? `${((100 * total.porCat[i].n) / total.denom).toFixed(1)}%`
+                    : '—'
+              }
+              detalle={`${total.porCat[i].suprimido ? 'menos de 5' : total.porCat[i].n.toLocaleString('es-CO')} de ${total.denom.toLocaleString('es-CO')} personas`}
+              acento={color}
+            />
+          ))}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                <th className="py-2 pr-3">Año</th>
+                {CATS.map(({ etiqueta }) => (
+                  <th key={etiqueta} className="py-2 pr-3">{etiqueta}</th>
+                ))}
+                <th className="py-2">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {anios.map((a) => {
+                const r = resumen(a);
+                return (
+                  <tr key={a} className="border-b border-slate-100">
+                    <td className="py-2 pr-3 font-semibold">{a}</td>
+                    {r.porCat.map((c, i) => (
+                      <td key={i} className="py-2 pr-3">{celda(c.n, c.suprimido, r.denom)}</td>
+                    ))}
+                    <td className="py-2">{r.denom.toLocaleString('es-CO')}</td>
+                  </tr>
+                );
+              })}
+              <tr className="font-bold">
+                <td className="py-2 pr-3">Todos los años</td>
+                {total.porCat.map((c, i) => (
+                  <td key={i} className="py-2 pr-3">{celda(c.n, c.suprimido, total.denom)}</td>
+                ))}
+                <td className="py-2">{total.denom.toLocaleString('es-CO')}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </Seccion>
+    );
+  }
+
   // Renderiza una dimensión de v_pub_demografia como tarjeta — real, "no aplica" (esta fuente
   // nunca trae ese dato para el programa elegido) o "sin datos" (el filtro vigente no trae
   // filas, pero el programa sí tiene la fuente). "No aplica" se decide SOLO con datos reales
@@ -1847,6 +1952,7 @@ export default function Pagina() {
             {NOMBRE_PROGRAMA[programa]} · {cohorte} · {ETIQUETA_ESTADO[estado]}
             {programa === 'mr' ? ` — fuente: BD-Mujeres ROFÉ (${totalMrConDatos} mujeres con datos sociodemográficos).` : ' — fuente: BD de monitorias.'}
           </p>
+          <GeneroTodosLosAnios />
           <div className="grid md:grid-cols-2 gap-6">
             {DIMENSIONES_DEMOGRAFIA.map((dim) => (
               <TarjetaDemografia key={dim} dimension={dim} />
