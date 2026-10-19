@@ -1184,10 +1184,18 @@ export default function Pagina() {
   // confiable para "activos de esta ciudad" (mismo motivo que MR no cruza Demografía x ciudad).
   const demografiaTotalEsperado = useMemo(() => {
     if (!ingresosProg || ciudadElegida) return null;
+    // JC en la cohorte viva: los activos del titular ("Actuales") salen de Seguimiento
+    // (v_pub_geografia), no del canon Q10 -- se usa la misma fuente para que la población
+    // total de Demografía cuadre con ese KPI (canon 698 vs Seguimiento 699 el 2026-10-19).
+    if (estado === 'activos' && programa === 'jc' && esActual && datos) {
+      return datos.geografiaMunicipio
+        .filter((g) => g.programa === programa && g.cohorte === cohorte)
+        .reduce((s, g) => s + (g.personas ?? 0), 0);
+    }
     if (estado === 'activos') return ingresosProg.activos ?? null;
     if (estado === 'retirados') return ingresosProg.retirados ?? null;
     return ingresosProg.ingresados ?? null;
-  }, [ingresosProg, estado, ciudadElegida]);
+  }, [ingresosProg, estado, ciudadElegida, programa, esActual, datos, cohorte]);
 
   // Segmentos del gráfico de aprobación por curso, recortados al Estado elegido: Activos
   // (aprobó/en curso, denominador=activos), Retirados (aprobó-y-retiró/retirado,
