@@ -282,13 +282,26 @@ function EmbudoFormacionMr(
 // aparecía en ningún lado, dejando la resta en silencio. Nunca ocultar esto (regla del
 // rediseño §2.3, mismo espíritu que NoAplica/NotaFiltros): mejor un punto gris chiquito que
 // una cifra que no cuadra sin explicación.
-function PuntoSinDato({ cantidad, texto, className }: { cantidad: number; texto?: string; className?: string }) {
-  if (cantidad <= 0) return null;
+function PuntoSinDato({ cantidad, texto, className, total }: { cantidad: number; texto?: string; className?: string; total?: number | null }) {
+  // `total` = población total de la vista (pedido 2026-10-19, Samuel): punto azul con el
+  // denominador, para leer "N sin dato" contra el universo completo y no en el vacío.
+  const hayTotal = total != null && total > 0;
+  if (cantidad <= 0 && !hayTotal) return null;
   return (
-    <p className={`text-[11px] text-slate-400 flex items-center gap-1.5 ${className ?? 'mb-2'}`}>
-      <span className="inline-block w-2 h-2 rounded-full bg-slate-300 shrink-0" />
-      {texto ?? `${cantidad.toLocaleString('es-CO')} sin dato (nunca lo llenaron)`}
-    </p>
+    <div className={`text-[11px] text-slate-400 flex flex-wrap items-center gap-x-4 gap-y-0.5 ${className ?? 'mb-2'}`}>
+      {hayTotal && (
+        <p className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: C.azul2 }} />
+          {`Población total: ${total!.toLocaleString('es-CO')}`}
+        </p>
+      )}
+      {cantidad > 0 && (
+        <p className="flex items-center gap-1.5">
+          <span className="inline-block w-2 h-2 rounded-full bg-slate-300 shrink-0" />
+          {texto ?? `${cantidad.toLocaleString('es-CO')} sin dato (nunca lo llenaron)`}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -1543,7 +1556,7 @@ export default function Pagina() {
       }));
       return (
         <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
-          <PuntoSinDato cantidad={sinDato} />
+          <PuntoSinDato cantidad={sinDato} total={demografiaTotalEsperado} />
           <GraficoEmprendimiento datos={filas} />
         </Seccion>
       );
@@ -1556,7 +1569,7 @@ export default function Pagina() {
       }));
       return (
         <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
-          <PuntoSinDato cantidad={sinDato} />
+          <PuntoSinDato cantidad={sinDato} total={demografiaTotalEsperado} />
           <GraficoEmprendimiento datos={filas} />
         </Seccion>
       );
@@ -1571,7 +1584,7 @@ export default function Pagina() {
     if (orden) filas.sort((a, b) => orden.indexOf(a.orden) - orden.indexOf(b.orden));
     return (
       <Seccion titulo={ETIQUETA_DIMENSION[dimension]} nota={dimension === 'edad_rango' ? 'En rangos — nunca edades individuales.' : undefined}>
-        <PuntoSinDato cantidad={sinDato} />
+        <PuntoSinDato cantidad={sinDato} total={demografiaTotalEsperado} />
         <GraficoBarras datos={filas} dataKey="total" nombre="Personas" color={C.azul2} />
       </Seccion>
     );
