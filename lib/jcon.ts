@@ -13,41 +13,46 @@ async function leerJcon<T>(recurso: string): Promise<T[]> {
   return resp.json();
 }
 
-export interface JconResumen {
+// Todas las vistas traen una fila por combinación de filtro (002_vistas_filtro_jcon.sql):
+// ciudad_f ∈ {BAQ, BOG, CAL, CTG, MED, 'todas'} × anio_f ∈ {2019…2025, 'todos'}.
+// El panel elige la fila del filtro activo (no suma celdas). null = género/edad/asistencia de un
+// grupo < 5 (oculto); los conteos por año, horario y ciudad vienen completos.
+interface Filtro {
   cohorte_jcon: string;
-  inscritos: number;
-  manana: number;
-  tarde: number;
-  retirados: number;
+  ciudad_f: string;
+  anio_f: string;
+}
+
+export interface JconResumen extends Filtro {
+  inscritos: number | null;
+  manana: number | null;
+  tarde: number | null;
   anios_jc: number;
-  con_demografia: number;
+  con_demografia: number | null;
   clases: number;
   asistencia_promedio_pct: number | null;
   actualizado: string | null;
 }
 
-// dimension: anio_jc | horario | genero | edad_rango | ciudad. total null = grupo < 5 (oculto).
-export interface JconDemografia {
-  cohorte_jcon: string;
+// dimension: anio_jc | horario | genero | edad_rango | ciudad.
+export interface JconDemografia extends Filtro {
   dimension: string;
   categoria: string;
   total: number | null;
   total_dimension: number;
 }
 
-export interface JconAsistenciaClase {
-  cohorte_jcon: string;
+export interface JconAsistenciaClase extends Filtro {
   clase_id: number;
   fecha: string;
   horario: string | null;
   tema: string | null;
-  inscritos: number;
-  asistentes: number;
+  inscritos: number | null;
+  asistentes: number | null;
 }
 
-// dimension: anio_jc | horario | genero | ciudad. Nulls = grupo < 5 (oculto).
-export interface JconAsistenciaGrupo {
-  cohorte_jcon: string;
+// dimension: anio_jc | horario | genero | ciudad.
+export interface JconAsistenciaGrupo extends Filtro {
   dimension: string;
   categoria: string;
   estudiantes: number | null;
@@ -63,10 +68,10 @@ export interface DatosJcon {
 
 export async function cargarJcon(): Promise<DatosJcon> {
   const [resumen, demografia, asistenciaClase, asistenciaGrupo] = await Promise.all([
-    leerJcon<JconResumen>('v_pub_resumen?order=cohorte_jcon.desc'),
-    leerJcon<JconDemografia>('v_pub_demografia'),
-    leerJcon<JconAsistenciaClase>('v_pub_asistencia_clase?order=fecha.asc'),
-    leerJcon<JconAsistenciaGrupo>('v_pub_asistencia_grupo'),
+    leerJcon<JconResumen>('v_pub_resumen_filtro?order=cohorte_jcon.desc'),
+    leerJcon<JconDemografia>('v_pub_demografia_filtro'),
+    leerJcon<JconAsistenciaClase>('v_pub_asistencia_clase_filtro?order=fecha.asc'),
+    leerJcon<JconAsistenciaGrupo>('v_pub_asistencia_grupo_filtro'),
   ]);
   return { resumen, demografia, asistenciaClase, asistenciaGrupo };
 }
