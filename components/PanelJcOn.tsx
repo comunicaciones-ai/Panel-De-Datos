@@ -13,8 +13,8 @@ import { cargarJcon, DatosJcon, ETIQUETA_HORARIO, JconDemografia } from '@/lib/j
 import { C, GraficoBarras } from '@/components/graficos';
 import { Kpi, NoAplica, Seccion } from '@/components/ui';
 
-type TabJcon = 'Resumen' | 'Por año' | 'Demografía' | 'Asistencia';
-const TABS_JCON: TabJcon[] = ['Resumen', 'Por año', 'Demografía', 'Asistencia'];
+type TabJcon = 'Resumen' | 'Por año' | 'Asistencia';
+const TABS_JCON: TabJcon[] = ['Resumen', 'Por año', 'Asistencia'];
 
 const VERDE_OSCURO = '#3f6b2c';
 const ORDEN_EDAD = ['< 18', '18-20', '21-22', '23-24', '25+'];
@@ -132,7 +132,8 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
     );
   };
 
-  // Tarjetas demográficas: en Resumen y en Demografía. Se omite la dimensión que ya fija el filtro.
+  // Tarjetas demográficas (en Resumen; la pestaña Demografía se quitó 2026-10-26). Se omite la
+  // dimensión que ya fija el filtro.
   const tarjetasDemografia = (
     <>
       <div className="grid lg:grid-cols-2 gap-x-5">
@@ -242,6 +243,11 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
             {!anioPuntual && barras('anio_jc', 'Estudiantes por año en que cursaron JC', 'Promoción de Jóvenes creaTIvos de la que viene cada estudiante.')}
             {barras('horario', 'Estudiantes por horario', 'Grupo de clase asignado.', VERDE_OSCURO)}
           </div>
+          <p className="text-xs text-slate-400 mb-3">
+            Género, edad y ciudad se toman del registro de cada estudiante cuando cursó JC
+            {resumen.con_demografia != null ? ` (${resumen.con_demografia} de ${resumen.inscritos} con datos completos)` : ''}.
+            La edad es aproximada al inicio del programa (02/11/2026).
+          </p>
           {tarjetasDemografia}
         </>
       )}
@@ -257,17 +263,6 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
               <GraficoBarras datos={asistenciaGrupo('anio_jc')} dataKey="pct" nombre="% asistencia" color={C.verde} dominioMax={100} sufijoEtiqueta="%" decimalesEtiqueta={1} />
             )}
           </Seccion>
-        </>
-      )}
-
-      {resumen?.inscritos != null && tab === 'Demografía' && (
-        <>
-          <p className="text-xs text-slate-400 mb-3">
-            Género, edad y ciudad se toman del registro de cada estudiante cuando cursó JC
-            {resumen.con_demografia != null ? ` (${resumen.con_demografia} de ${resumen.inscritos} con datos completos)` : ''}.
-            La edad es aproximada al inicio del programa (02/11/2026).
-          </p>
-          {tarjetasDemografia}
         </>
       )}
 

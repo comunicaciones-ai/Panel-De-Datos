@@ -517,10 +517,13 @@ export default function Pagina() {
   const cohorteActual = cohortes[0] ?? '';
   const cohorte = cohorteElegida ?? cohorteActual;
   const esActual = cohorte === cohorteActual && cohorte !== '';
-  // "Todos" los años, SOLO Mujeres ROFÉ (2026-08-31) — ver comentario junto al selector de
-  // cohorte más abajo. Repetir `programa === 'mr'` en cada sitio evita que este valor se
-  // "filtre" a JC si `cohorteElegida` queda en 'todos' al cambiar de programa.
-  const esMrTodos = programa === 'mr' && cohorte === 'todos';
+  // "Todos" los años: MR desde 2026-08-31, JC desde 2026-10-26 (pedido de Samuel). esTodos =
+  // filtros/sumas genéricos por cohorte; esMrTodos = rutas normalizadas de MR (solo MR las tiene);
+  // esJcTodos = JC con todos los años: Cursos, Retención, Historial, Asistencia y Emoflow no se
+  // combinan entre años (cursos cambian de nombre, procesos distintos) → "No aplica".
+  const esTodos = cohorte === 'todos';
+  const esMrTodos = programa === 'mr' && esTodos;
+  const esJcTodos = programa === 'jc' && esTodos;
   // Texto de despliegue: "todos" a secas lee mal en frases ("Ruta Mujeres ROFÉ todos") — usar
   // en cualquier interpolación de `cohorte` pensada para texto, nunca para comparar valores.
   const etiquetaCohorte = cohorte === 'todos' ? 'todos los años' : cohorte;
@@ -535,7 +538,7 @@ export default function Pagina() {
   const geografiaProg = useMemo(
     () =>
       datos
-        ? datos.geografiaMunicipio.filter((g) => g.programa === programa && (esMrTodos || g.cohorte === cohorte))
+        ? datos.geografiaMunicipio.filter((g) => g.programa === programa && (esTodos || g.cohorte === cohorte))
         : [],
     [datos, programa, cohorte],
   );
@@ -620,9 +623,9 @@ export default function Pagina() {
   const cursosProg = useMemo(
     () =>
       datos
-        ? datos.cursos.filter((c) => c.programa === programa && (esMrTodos || c.cohorte === cohorte))
+        ? datos.cursos.filter((c) => c.programa === programa && (esTodos || c.cohorte === cohorte))
         : [],
-    [datos, programa, cohorte, esMrTodos],
+    [datos, programa, cohorte, esTodos],
   );
 
   // "Completación por curso" para esMrTodos: 5 rutas reales en vez de 14 filas curso×cohorte
@@ -684,11 +687,11 @@ export default function Pagina() {
     return datos.pubDemografia.filter(
       (d) =>
         d.programa === programa &&
-        (esMrTodos || d.cohorte === cohorte) &&
+        (esTodos || d.cohorte === cohorte) &&
         (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
         (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
     );
-  }, [datos, programa, cohorte, estado, ciudadElegida, esMrTodos]);
+  }, [datos, programa, cohorte, estado, ciudadElegida, esTodos]);
 
   const segmentoPoblacionalFiltrado = useMemo(() => {
     if (!datos || programa !== 'jc') return [];
@@ -712,11 +715,11 @@ export default function Pagina() {
     return datos.pubEmprendimiento.filter(
       (d) =>
         d.programa === programa &&
-        (esMrTodos || d.cohorte === cohorte) &&
+        (esTodos || d.cohorte === cohorte) &&
         (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
         (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
     );
-  }, [datos, programa, cohorte, estado, ciudadElegida, esMrTodos]);
+  }, [datos, programa, cohorte, estado, ciudadElegida, esTodos]);
   const emprendimientoAplicaPrograma = !!datos && datos.pubEmprendimiento.some((d) => d.programa === programa);
 
   // Impacto financiero MR (Fase 2 ampliación PBI, migración 046, 2026-08-15) — la vista ya
@@ -1020,14 +1023,14 @@ export default function Pagina() {
   const aprobacionProg = useMemo(() => {
     if (!datos) return [];
     const filas = datos.aprobacion.filter(
-      (a) => a.programa === programa && (esMrTodos || a.cohorte === cohorte),
+      (a) => a.programa === programa && (esTodos || a.cohorte === cohorte),
     );
     // Bienvenida es el primer curso que ven las y los estudiantes (JC) — se muestra siempre
     // de primero en el gráfico, aunque el resto quede ordenado por tamaño de cohorte
     // (cursaron.desc, ya viene así de la API). Pedido de Samuel 2026-09-07.
     const esBienvenida = (a: (typeof filas)[number]) => /bienvenid/i.test(a.curso);
     return [...filas.filter(esBienvenida), ...filas.filter((a) => !esBienvenida(a))];
-  }, [datos, programa, cohorte, esMrTodos]);
+  }, [datos, programa, cohorte, esTodos]);
 
   // Única decisión de qué vista de Cursos usar (§1.2 del diagnóstico: antes se calculaba dos
   // veces, en Resumen y en Cursos, con riesgo de desalinearse). Se consume igual en ambos tabs.
@@ -1094,7 +1097,7 @@ export default function Pagina() {
   const distribucionEst = useMemo(() => {
     if (!datos) return [] as { etiqueta: string; estudiantes: number }[];
     const filas = datos.estudiantesDist.filter(
-      (d) => (esMrTodos || d.cohorte === cohorte) && d.programa === programa,
+      (d) => (esTodos || d.cohorte === cohorte) && d.programa === programa,
     );
     if (filas.length === 0) return [];
     const max = Math.max(...filas.map((f) => f.cursos_aprobados));
@@ -1102,7 +1105,7 @@ export default function Pagina() {
       etiqueta: String(n),
       estudiantes: filas.find((f) => f.cursos_aprobados === n)?.estudiantes ?? 0,
     }));
-  }, [datos, cohorte, programa, esMrTodos]);
+  }, [datos, cohorte, programa, esTodos]);
 
   // cohorte_ingresos solo tiene la cohorte viva; para las cerradas (2019–2025) el canon oficial
   // vive en v_pub_cohorte (mismo dato que el banner de panel_control_gui.py). Fallback → las
@@ -1110,7 +1113,7 @@ export default function Pagina() {
   // en vez de quedar en blanco. La viva (2026) sigue tomando cohorte_ingresos (idéntico al canon).
   const ingresosProg = useMemo(() => {
     if (!datos) return undefined;
-    if (esMrTodos) {
+    if (esTodos) {
       // Una fila por cohorte, con la misma precedencia que el caso normal (ingresos = cohorte
       // viva, pubCohorte = canon de cohortes cerradas) — se resuelve cohorte por cohorte antes
       // de sumar, para no mezclar una fuente incompleta si algún año tuviera ambas.
@@ -1133,7 +1136,7 @@ export default function Pagina() {
       datos.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa) ??
       datos.pubCohorte.find((i) => i.cohorte === cohorte && i.programa === programa)
     );
-  }, [datos, cohorte, programa, cohortes, esMrTodos]);
+  }, [datos, cohorte, programa, cohortes, esTodos]);
 
   // Denominador correcto para el punto gris "sin dato" de TarjetaDemografia (pedido 2026-08-28,
   // Samuel: "revisa que las otras vistas también cuadren" tras el fix de MR). Auditoría real
@@ -1218,11 +1221,11 @@ export default function Pagina() {
     // 'todos' se suman en vez de buscar una fila que no existe (ver sumarProgramaStats/
     // sumarCohorteStats arriba, mismo criterio de recalcular % desde conteos que ya usa
     // retencionPorCiudad).
-    const ps = esMrTodos
+    const ps = esTodos
       ? sumarProgramaStats(datos.programas.filter((p) => p.programa === programa))
       : datos.programas.find((p) => p.programa === programa && p.cohorte === cohorte);
     // cohorte_stats viene separada por programa desde la migración de separación JC/MR
-    const co = esMrTodos
+    const co = esTodos
       ? sumarCohorteStats(datos.cohorte.filter((c) => c.programa === programa))
       : datos.cohorte.find((c) => c.cohorte === cohorte && c.programa === programa);
     const ing = ingresosProg;
@@ -1411,7 +1414,7 @@ export default function Pagina() {
         ? retencionCiudadSeleccionada.activos
         : usarActualesSeguimiento ? actualesGeo : (ing?.activos ?? null),
     };
-  }, [datos, programa, cohorte, estado, hayFiltroCiudad, ciudadElegida, geografiaResumen, retencionPorCiudad, esActual, esMrTodos, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
+  }, [datos, programa, cohorte, estado, hayFiltroCiudad, ciudadElegida, geografiaResumen, retencionPorCiudad, esActual, esTodos, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
 
   // Retención y Asistencia se quitaron del tab bar de MR (pedido 2026-08-27, tras la
   // auditoría de 2 agentes): miden procesos que MR no tiene estructurados de la misma forma
@@ -1421,9 +1424,6 @@ export default function Pagina() {
   const cambiarPrograma = (p: Programa) => {
     setPrograma(p);
     if (p === 'mr' && (tab === 'Retención' || tab === 'Asistencia')) setTab('Resumen');
-    // "Todos" es exclusivo de Mujeres ROFÉ (ver esMrTodos) — si venía elegido al cambiar a
-    // Jóvenes creaTIvos, se descarta para no dejar el selector en un valor sin botón activo.
-    if (p === 'jc' && cohorteElegida === 'todos') setCohorteElegida(null);
   };
   const cambiarCohorte = (coh: string) => setCohorteElegida(coh);
 
@@ -2041,12 +2041,11 @@ export default function Pagina() {
       ) : (
       <>
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        {/* Selector de cohorte (actual + históricas de Q10). "Todos" solo para Mujeres ROFÉ
-            (2026-08-31): tras el backfill de archivado=true ya hay histórico real 2023-2026,
-            a diferencia de JC donde "Todos" mezclaría procesos muy distintos (Retención/
-            Asistencia/Emoflow) que no están pensados para verse combinados entre años. */}
+        {/* Selector de cohorte (actual + históricas de Q10) + "Todos": MR desde 2026-08-31,
+            JC desde 2026-10-26 — en JC las pestañas que no se combinan entre años avisan
+            "No aplica" (ver esJcTodos). */}
         <div className="flex gap-1 tarjeta-glass p-1">
-          {(programa === 'mr' ? ['todos', ...cohortes] : cohortes).map((coh) => (
+          {['todos', ...cohortes].map((coh) => (
             <button
               key={coh}
               onClick={() => cambiarCohorte(coh)}
@@ -2428,6 +2427,10 @@ export default function Pagina() {
             >
               <GraficoAprobacion datos={aprobacionProg.map(segmentosAprobacion)} />
             </Seccion>
+          ) : esJcTodos ? (
+            <Seccion titulo="Cursos — todos los años">
+              <NoAplica motivo="los cursos de Jóvenes creaTIvos cambian cada año; elige una cohorte para ver el avance por curso." />
+            </Seccion>
           ) : (
             <Seccion
               titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
@@ -2520,7 +2523,10 @@ export default function Pagina() {
         </>
       )}
 
-      {tab === 'Retención' && (() => {
+      {esJcTodos && ['Retención', 'Cursos', 'Historial', 'Asistencia', 'Emoflow'].includes(tab) && (
+        <NoAplica motivo={`${tab} no se combina entre años en Jóvenes creaTIvos; elige una cohorte arriba para verla.`} />
+      )}
+      {tab === 'Retención' && !esJcTodos && (() => {
         // HISTORIAL por cohorte (canon-exacto todos los años, v_pub_cohorte): retención =
         // culminantes÷ingresados, deserción = retirados÷ingresados. Siempre visible — es el
         // historial confiable. El desglose POR CIUDAD solo es canon-exacto en la cohorte vigente
@@ -2818,7 +2824,7 @@ export default function Pagina() {
         );
       })()}
 
-      {tab === 'Cursos' && !mostrarCanonico && (
+      {tab === 'Cursos' && !mostrarCanonico && !esJcTodos && (
         <>
           <Seccion
             titulo={`Completación por curso — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte}${ciudadElegida ? ` (${ETIQUETA_GRUPO[ciudadElegida] ?? ciudadElegida})` : ''}`}
@@ -2905,7 +2911,7 @@ export default function Pagina() {
         </>
       )}
 
-      {tab === 'Historial' && (
+      {tab === 'Historial' && !esJcTodos && (
         !esActual ? (
           <NoAplica motivo="el histórico diario no distingue cohortes — solo se muestra para la cohorte vigente." />
         ) : (
@@ -3201,7 +3207,7 @@ export default function Pagina() {
         </>
       ) : null}
 
-      {tab === 'Asistencia' && (() => {
+      {tab === 'Asistencia' && !esJcTodos && (() => {
         const filas = pubAsistenciaFiltrada;
         if (filas.length === 0) {
           return <NoAplica motivo="sin datos de asistencia suficientes para este filtro (cohorte/estado/ciudad elegidos)." suave />;
@@ -3261,7 +3267,7 @@ export default function Pagina() {
           </>
         );
       })()}
-      {tab === 'Emoflow' && programa === 'jc' && (
+      {tab === 'Emoflow' && programa === 'jc' && !esJcTodos && (
         <>
           {/* Toggle de alcance. El CSV de Emoflow arrastra el histórico completo (827): además
               de los estudiantes vigentes trae 17 en retiro probable y 68 que nunca llegaron a
