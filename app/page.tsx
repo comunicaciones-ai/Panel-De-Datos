@@ -26,8 +26,10 @@ import { motion } from 'framer-motion';
 import { Hero } from '@/components/efectos/Hero';
 import { BackgroundPaths } from '@/components/efectos/BackgroundPaths';
 import { BotonActualizar } from '@/components/BotonActualizar';
+import { Kpi, NoAplica, Seccion } from '@/components/ui';
+import { PanelJcOn } from '@/components/PanelJcOn';
 
-type Programa = 'jc' | 'mr';
+type Programa = 'jc' | 'mr' | 'jcon';
 // Todas las secciones están siempre disponibles (rediseño 2026-08-03): cada tab decide
 // internamente si tiene algo que mostrar o si debe explicar "No aplica" — ya no se ocultan
 // tabs según programa/cohorte (ver §1.4 y §2.2 de plan-rediseno-panel-datos-2026-07-30.md).
@@ -213,22 +215,6 @@ function fechaCortaEs(iso?: string | null): string | null {
   return `${d} de ${MESES_ES[m - 1]}`;
 }
 
-function Kpi({ titulo, valor, detalle, acento }: { titulo: string; valor: string; detalle?: string; acento?: string }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 14 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: '-40px' }}
-      transition={{ duration: 0.5 }}
-      className="tarjeta-glass p-3"
-      style={acento ? { borderTop: `3px solid ${acento}` } : undefined}
-    >
-      <p className="text-xs uppercase tracking-wide text-slate-500">{titulo}</p>
-      <p className="text-2xl font-bold kpi-valor mt-1" style={acento ? { color: acento } : undefined}>{valor}</p>
-      {detalle && <p className="text-xs text-slate-400 mt-1">{detalle}</p>}
-    </motion.div>
-  );
-}
 
 // Embudo Formación MR (pedido 2026-08-27): "0 cursos" aparte + una barra ancha = inscritos,
 // con una barra azul MÁS ANGOSTA adentro = las que sí entraron a Q10 (iniciados), y dentro de
@@ -332,33 +318,6 @@ function colorRetencion(pct: number): string {
   return C.rojo;
 }
 
-function Seccion({ titulo, nota, children }: { titulo: string; nota?: string; children: React.ReactNode }) {
-  return (
-    <motion.section
-      initial={{ opacity: 0, y: 22 }}
-      whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, margin: '-60px' }}
-      transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="tarjeta-glass p-4 mb-5"
-    >
-      <h2 className="font-bold text-slate-700 mb-1">{titulo}</h2>
-      {nota && <p className="text-xs text-slate-400 mb-3">{nota}</p>}
-      {children}
-    </motion.section>
-  );
-}
-
-// Tarjeta "No aplica" — regla dura del rediseño (§2.3): nunca desaparecer una sección o
-// mostrar 0%/vacío sin explicar por qué. Se usa tanto para incompatibilidades estructurales
-// (JC sin estrato, MR sin Emoflow) como, en un tono más suave, cuando el filtro vigente
-// simplemente no tiene datos todavía.
-function NoAplica({ motivo, suave = false }: { motivo: string; suave?: boolean }) {
-  return (
-    <div className="rounded-xl border border-dashed border-slate-300/70 bg-white/20 p-5 text-center">
-      <p className="text-sm text-slate-400">{suave ? 'Sin datos — ' : 'No aplica — '}{motivo}</p>
-    </div>
-  );
-}
 
 // Aviso "estamos trabajando en este panel" — para vistas cuyo dato existe pero el equipo aún no
 // considera confiable para el segmento elegido (ej. demografía/emprendimiento por Retirados). NO
@@ -533,7 +492,8 @@ export default function Pagina() {
   // Fondo de página rosado mientras el programa activo sea Mujeres ROFÉ
   useEffect(() => {
     document.body.classList.toggle('tema-mr-body', programa === 'mr');
-    return () => document.body.classList.remove('tema-mr-body');
+    document.body.classList.toggle('tema-jcon-body', programa === 'jcon');
+    return () => document.body.classList.remove('tema-mr-body', 'tema-jcon-body');
   }, [programa]);
 
   // La vista "Por estudiantes" solo existe para activos — si el usuario cambia el filtro
@@ -1467,6 +1427,40 @@ export default function Pagina() {
   };
   const cambiarCohorte = (coh: string) => setCohorteElegida(coh);
 
+  // Selector de programa (compartido con el panel JC-ON, que tiene su propio layout y datos)
+  const selectorPrograma = (
+    <div className="flex gap-1 tarjeta-glass p-1">
+      {(['jc', 'mr', 'jcon'] as Programa[]).map((p) => (
+        <button
+          key={p}
+          onClick={() => cambiarPrograma(p)}
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
+            programa === p
+              ? p === 'mr'
+                ? 'pill-metal pill-metal-rosa'
+                : p === 'jcon'
+                  ? 'pill-metal pill-metal-verde'
+                  : 'pill-metal pill-metal-azul'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          {NOMBRE_PROGRAMA[p]}
+        </button>
+      ))}
+    </div>
+  );
+
+  // JC-ON: tercer programa, sin Q10 — esquema `jcon` aparte y asistencia por Zoom.
+  if (programa === 'jcon')
+    return (
+      <>
+        <Hero tema="jcon" />
+        <BackgroundPaths tema="jcon" />
+        <PanelJcOn selectorPrograma={selectorPrograma} />
+      </>
+    );
+
+
   if (error)
     return (
       <>
@@ -2019,23 +2013,7 @@ export default function Pagina() {
       </div>
       {/* Selector de programa */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
-        <div className="flex gap-1 tarjeta-glass p-1">
-          {(['jc', 'mr'] as Programa[]).map((p) => (
-            <button
-              key={p}
-              onClick={() => cambiarPrograma(p)}
-              className={`px-4 py-2 rounded-lg text-sm font-bold transition-colors ${
-                programa === p
-                  ? p === 'mr'
-                    ? 'pill-metal pill-metal-rosa'
-                    : 'pill-metal pill-metal-azul'
-                  : 'text-slate-600 hover:bg-slate-100'
-              }`}
-            >
-              {NOMBRE_PROGRAMA[p]}
-            </button>
-          ))}
-        </div>
+        {selectorPrograma}
         {/* Toggle Universo/Q10, SOLO MR (2026-08-27). Por defecto "Universo histórico" — no
             depende de cohorte, no necesita el resto de controles de abajo. "Q10" revela el
             selector de cohorte + los tabs de siempre, sin tocar su lógica. */}

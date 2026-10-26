@@ -2,7 +2,7 @@
 
 // Hero de presentación: fondo profundo de marca + partículas interactivas +
 // título con animación por palabra + CTA metal líquido. Tema por programa:
-// azul (JC, default) o rosado (Mujeres ROFÉ — tintes del panel docs/mujeres-rofe).
+// azul (JC, default), rosado (Mujeres ROFÉ — tintes del panel docs/mujeres-rofe) o verde (JC-ON).
 
 import { motion, useReducedMotion } from 'framer-motion';
 import { ParticleHero } from './ParticleHero';
@@ -12,11 +12,14 @@ const TITULO = 'Datos que tocan vidas';
 
 // Partículas MR: prioridad a los rosados, con chispas amarillas de marca
 const PARTICULAS_MR = ['#E5C5CC', '#F0DDE2', '#E5798F', '#C12D4C', '#FDF6F8', '#EEC935'];
+// Partículas JC-ON: verdes de marca (#6EA050 y tintes) con chispas amarillas
+const PARTICULAS_JCON = ['#C9E3B8', '#8FBE74', '#6EA050', '#F1F8EC', '#EEC935', '#83B6DD'];
 
-export function Hero({ tema = 'jc' }: { tema?: 'jc' | 'mr' }) {
+export function Hero({ tema = 'jc' }: { tema?: 'jc' | 'mr' | 'jcon' }) {
   const reducido = useReducedMotion();
   const palabras = TITULO.split(' ');
   const esMr = tema === 'mr';
+  const esJcon = tema === 'jcon';
 
   const irAlPanel = () => {
     document.getElementById('panel')?.scrollIntoView({ behavior: 'smooth' });
@@ -27,19 +30,21 @@ export function Hero({ tema = 'jc' }: { tema?: 'jc' | 'mr' }) {
       className={`relative overflow-hidden bg-gradient-to-br ${
         esMr
           ? 'from-[#3a1120] via-[#7a1f38] to-rofe-rojo'
-          : 'from-[#16283d] via-[#2b4a6f] to-rofe-azul'
+          : esJcon
+            ? 'from-[#14261a] via-[#2f5a2a] to-rofe-verde'
+            : 'from-[#16283d] via-[#2b4a6f] to-rofe-azul'
       }`}
     >
       <ParticleHero
         key={tema}
-        paleta={esMr ? PARTICULAS_MR : undefined}
-        colorEnlace={esMr ? '229, 197, 204' : undefined}
+        paleta={esMr ? PARTICULAS_MR : esJcon ? PARTICULAS_JCON : undefined}
+        colorEnlace={esMr ? '229, 197, 204' : esJcon ? '201, 227, 184' : undefined}
       />
       {/* halo suave de marca */}
       <div
         aria-hidden
         className={`pointer-events-none absolute -top-32 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full blur-3xl ${
-          esMr ? 'bg-[#E5C5CC]/25' : 'bg-rofe-azul3/20'
+          esMr ? 'bg-[#E5C5CC]/25' : esJcon ? 'bg-[#C9E3B8]/25' : 'bg-rofe-azul3/20'
         }`}
       />
       <div className="relative mx-auto flex max-w-6xl flex-col items-center px-4 py-24 text-center md:py-32">
@@ -48,10 +53,10 @@ export function Hero({ tema = 'jc' }: { tema?: 'jc' | 'mr' }) {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6 }}
           className={`mb-4 rounded-full border border-white/20 bg-white/10 px-4 py-1 text-xs font-medium tracking-wide backdrop-blur-sm ${
-            esMr ? 'text-[#F0DDE2]' : 'text-rofe-azul3'
+            esMr ? 'text-[#F0DDE2]' : esJcon ? 'text-[#DDEFD2]' : 'text-rofe-azul3'
           }`}
         >
-          Fundación ROFÉ · Jóvenes creaTIvos · Mujeres ROFÉ
+          Fundación ROFÉ · Jóvenes creaTIvos · Mujeres ROFÉ · JC-ON
         </motion.p>
 
         <h1 className="max-w-3xl text-4xl font-bold leading-tight text-white md:text-6xl">
@@ -85,7 +90,7 @@ export function Hero({ tema = 'jc' }: { tema?: 'jc' | 'mr' }) {
           transition={{ delay: 0.95, duration: 0.7 }}
           className="mt-9"
         >
-          <LiquidMetalButton onClick={irAlPanel} className={esMr ? 'liquid-metal-rosa' : ''}>
+          <LiquidMetalButton onClick={irAlPanel} className={esMr ? 'liquid-metal-rosa' : esJcon ? 'liquid-metal-verde' : ''}>
             Explorar los datos
             <span aria-hidden>↓</span>
           </LiquidMetalButton>
@@ -94,7 +99,7 @@ export function Hero({ tema = 'jc' }: { tema?: 'jc' | 'mr' }) {
       {/* transición suave hacia el contenido (funde al color de fondo del tema) */}
       <div
         className={`absolute inset-x-0 bottom-0 h-16 bg-gradient-to-b from-transparent ${
-          esMr ? 'to-[#FAF0F3]' : 'to-slate-50'
+          esMr ? 'to-[#FAF0F3]' : esJcon ? 'to-[#F1F7EC]' : 'to-slate-50'
         }`}
       />
     </section>

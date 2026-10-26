@@ -11,6 +11,10 @@ body {
 body.tema-mr-body {
   background-color: #faf0f3;
 }
+/* Fondo verde claro cuando el programa activo es JC-ON (tinte de #6EA050) */
+body.tema-jcon-body {
+  background-color: #f1f7ec;
+}
 
 /* ── Tema por programa ───────────────────────────────────────────────────────
    El panel cambia de paleta según el programa activo: azul #406C9E = Jóvenes
@@ -27,6 +31,13 @@ body.tema-mr-body {
   --glass-borde: rgba(193, 45, 76, 0.25);
   --glass-sombra: rgba(193, 45, 76, 0.1);
   --glass-sombra-hover: rgba(193, 45, 76, 0.18);
+}
+/* JC-ON: verde de marca #6EA050 (texto KPI en #3f6b2c para contraste sobre blanco) */
+#panel.tema-jcon {
+  --acento: #3f6b2c;
+  --glass-borde: rgba(110, 160, 80, 0.3);
+  --glass-sombra: rgba(63, 107, 44, 0.1);
+  --glass-sombra-hover: rgba(63, 107, 44, 0.18);
 }
 .kpi-valor {
   color: var(--acento, #406c9e);
@@ -77,6 +88,23 @@ body.tema-mr-body {
       border-box;
   box-shadow:
     0 4px 18px rgba(193, 45, 76, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+/* Variante verde del botón (tema JC-ON) */
+.liquid-metal-verde {
+  background:
+    linear-gradient(#2f5a2a, #2f5a2a) padding-box,
+    conic-gradient(
+        from var(--metal-ang, 0deg),
+        #6ea050,
+        #c9e3b8,
+        #eec935,
+        #c9e3b8,
+        #6ea050
+      )
+      border-box;
+  box-shadow:
+    0 4px 18px rgba(110, 160, 80, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.25);
 }
 .liquid-metal-shine {

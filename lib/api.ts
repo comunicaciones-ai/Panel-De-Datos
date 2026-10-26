@@ -2,9 +2,9 @@
 // El anon key es público por diseño: RLS solo deja leer agregados y las vistas v_*.
 // Overridable por env en build (NEXT_PUBLIC_*) — defaults del proyecto panel-datos-rofe.
 
-const URL_BASE =
+export const URL_BASE =
   process.env.NEXT_PUBLIC_SUPABASE_URL ?? 'https://kbxptoowtnteflhrfwid.supabase.co';
-const ANON_KEY =
+export const ANON_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ??
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtieHB0b293dG50ZWZsaHJmd2lkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM2MzU4MDUsImV4cCI6MjA5OTIxMTgwNX0.xfj_GJYdRgPHUCpyxReKm7G7SMGTVn4oscDhakV6DSo';
 
@@ -733,6 +733,7 @@ export async function cargarTodo(): Promise<Datos> {
 export const NOMBRE_PROGRAMA: Record<string, string> = {
   jc: 'Jóvenes creaTIvos',
   mr: 'Mujeres ROFÉ',
+  jcon: 'JC-ON',
 };
 
 export const ETIQUETA_SITUACION: Record<string, string> = {
