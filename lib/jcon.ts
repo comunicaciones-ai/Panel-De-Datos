@@ -15,8 +15,8 @@ async function leerJcon<T>(recurso: string): Promise<T[]> {
 
 // Todas las vistas traen una fila por combinación de filtro (002_vistas_filtro_jcon.sql):
 // ciudad_f ∈ {BAQ, BOG, CAL, CTG, MED, 'todas'} × anio_f ∈ {2019…2025, 'todos'}.
-// El panel elige la fila del filtro activo (no suma celdas). null = género/edad/asistencia de un
-// grupo < 5 (oculto); los conteos por año, horario y ciudad vienen completos.
+// El panel elige la fila del filtro activo (no suma celdas). Sin ocultar grupos < 5 (2026-10-26);
+// null solo cuando aún no hay dato (p. ej. asistencia antes de la primera clase).
 interface Filtro {
   cohorte_jcon: string;
   ciudad_f: string;

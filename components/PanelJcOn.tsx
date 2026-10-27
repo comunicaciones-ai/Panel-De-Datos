@@ -4,8 +4,8 @@
 // con tema verde. No usa Q10: lee solo las vistas agregadas del esquema `jcon` (lib/jcon.ts) y
 // mide el avance con la asistencia de Zoom, que se carga cuando arrancan las clases (02/11/2026).
 // Filtros de año JC y ciudad (igual que JC): cada vista ya trae la fila de cada combinación.
-// Conteos por año, horario y ciudad van completos (también 2019–2021, grupos pequeños). Género,
-// edad y asistencia de grupos < 5 llegan en null desde Supabase y se muestran como "< 5".
+// Sin ocultar grupos < 5 (decisión de Samuel 2026-10-26: población muy pequeña). Solo en JC-ON;
+// JC y MR conservan su regla de grupos pequeños.
 
 import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { ETIQUETA_GRUPO } from '@/lib/api';
@@ -13,13 +13,12 @@ import { cargarJcon, DatosJcon, ETIQUETA_HORARIO, JconDemografia } from '@/lib/j
 import { C, GraficoBarras } from '@/components/graficos';
 import { Kpi, NoAplica, Seccion } from '@/components/ui';
 
-type TabJcon = 'Resumen' | 'Por año' | 'Asistencia';
-const TABS_JCON: TabJcon[] = ['Resumen', 'Por año', 'Asistencia'];
+type TabJcon = 'Resumen' | 'Asistencia';
+const TABS_JCON: TabJcon[] = ['Resumen', 'Asistencia'];
 
 const VERDE_OSCURO = '#3f6b2c';
 const ORDEN_EDAD = ['< 18', '18-20', '21-22', '23-24', '25+'];
 const ETIQUETA_GENERO: Record<string, string> = { Femenino: 'Mujeres', Masculino: 'Hombres', Otros: 'Otras identidades' };
-const NOTA_PRIVACIDAD = '"< 5" = género, edad o asistencia de un grupo muy pequeño, oculto por privacidad.';
 const etiquetaAnio = (a: string) => (a === 'todos' ? 'Todos' : a);
 
 function etiquetaCategoria(dimension: string, categoria: string): string {
@@ -34,16 +33,12 @@ function ordenar(dimension: string, a: string, b: string): number {
   return a.localeCompare(b, 'es');
 }
 
-// Filas de una dimensión → datos para GraficoBarras. Las celdas ocultas (< 5) se mantienen en
-// el eje con la etiqueta "(< 5)" y barra vacía, para no hacer desaparecer la categoría.
+// Filas de una dimensión → datos para GraficoBarras.
 function serie(filas: JconDemografia[], dimension: string, porTotal = false) {
   const datos = filas
     .filter((f) => f.dimension === dimension)
     .sort((a, b) => (porTotal ? (b.total ?? 0) - (a.total ?? 0) : ordenar(dimension, a.categoria, b.categoria)))
-    .map((f) => {
-      const nombre = etiquetaCategoria(dimension, f.categoria);
-      return { etiqueta: f.total == null ? `${nombre} (< 5)` : nombre, total: f.total };
-    });
+    .map((f) => ({ etiqueta: etiquetaCategoria(dimension, f.categoria), total: f.total }));
   const base = filas.find((f) => f.dimension === dimension)?.total_dimension ?? 0;
   return { datos, base };
 }
@@ -100,10 +95,7 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
     (datos ? enFiltro(datos.asistenciaGrupo) : [])
       .filter((g) => g.dimension === dimension)
       .sort((a, b) => ordenar(dimension, a.categoria, b.categoria))
-      .map((g) => {
-        const nombre = etiquetaCategoria(dimension, g.categoria);
-        return { etiqueta: g.pct_asistencia == null ? `${nombre} (< 5)` : nombre, pct: g.pct_asistencia };
-      });
+      .map((g) => ({ etiqueta: etiquetaCategoria(dimension, g.categoria), pct: g.pct_asistencia }));
 
   const nombreFiltro = [
     anio !== 'todos' ? `JC ${etiquetaAnio(anio)}` : null,
@@ -122,7 +114,7 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
   const barras = (dimension: string, titulo: string, nota: string, color = C.verde, porTotal = false) => {
     const { datos: d, base } = serie(demografia, dimension, porTotal);
     return (
-      <Seccion titulo={`${titulo}${sufijo}`} nota={`${nota} Base: ${base} estudiantes con el dato. ${NOTA_PRIVACIDAD}`}>
+      <Seccion titulo={`${titulo}${sufijo}`} nota={`${nota} Base: ${base} estudiantes con el dato.`}>
         {d.length ? (
           <GraficoBarras datos={d} dataKey="total" nombre="Estudiantes" color={color} rotarEtiquetas={d.length > 5} />
         ) : (
@@ -183,7 +175,7 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
                   }`}
                 >
                   {c === 'todas' ? 'Todas' : ETIQUETA_GRUPO[c] ?? c}
-                  <span className="ml-1 text-xs opacity-75">{n != null ? n : '< 5'}</span>
+                  <span className="ml-1 text-xs opacity-75">{n ?? '—'}</span>
                 </button>
               );
             })}
@@ -229,8 +221,8 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
         <>
           <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 mb-5">
             <Kpi titulo="Estudiantes JC-ON" valor={String(resumen.inscritos)} detalle={nombreFiltro || `Cohorte ${resumen.cohorte_jcon} · egresados JC`} />
-            <Kpi titulo="Grupo mañana" valor={resumen.manana != null ? String(resumen.manana) : '< 5'} detalle="10:00 a 12:00" />
-            <Kpi titulo="Grupo tarde" valor={resumen.tarde != null ? String(resumen.tarde) : '< 5'} detalle="2:00 a 4:00 p. m." />
+            <Kpi titulo="Grupo mañana" valor={String(resumen.manana ?? '—')} detalle="10:00 a 12:00" />
+            <Kpi titulo="Grupo tarde" valor={String(resumen.tarde ?? '—')} detalle="2:00 a 4:00 p. m." />
             <Kpi titulo="Promociones JC" valor={String(resumen.anios_jc)} detalle="años de egreso distintos" />
             <Kpi titulo="Clases realizadas" valor={String(resumen.clases)} detalle="sesiones Zoom registradas" />
             <Kpi
@@ -252,20 +244,6 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
         </>
       )}
 
-      {resumen?.inscritos != null && tab === 'Por año' && (
-        <>
-          {!anioPuntual && barras('anio_jc', 'Estudiantes JC-ON por promoción de JC', 'Año en que cada estudiante cursó Jóvenes creaTIvos.')}
-          <Seccion
-            titulo={`Asistencia promedio por promoción de JC${sufijo}`}
-            nota={`% de las clases de su horario a las que asistió cada estudiante, promediado por año de egreso. ${NOTA_PRIVACIDAD}`}
-          >
-            {sinClases ? avisoSinClases : (
-              <GraficoBarras datos={asistenciaGrupo('anio_jc')} dataKey="pct" nombre="% asistencia" color={C.verde} dominioMax={100} sufijoEtiqueta="%" decimalesEtiqueta={1} />
-            )}
-          </Seccion>
-        </>
-      )}
-
       {resumen?.inscritos != null && tab === 'Asistencia' && (
         sinClases ? (
           <Seccion titulo="Asistencia a clases (Zoom)">{avisoSinClases}</Seccion>
@@ -275,13 +253,14 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
               <GraficoBarras datos={clases} dataKey="pct" nombre="% asistencia" color={C.verde} dominioMax={100} sufijoEtiqueta="%" decimalesEtiqueta={0} rotarEtiquetas={clases.length > 8} />
             </Seccion>
             <div className="grid lg:grid-cols-2 gap-x-5">
-              {(['horario', 'genero', 'ciudad'] as const)
-                .filter((dim) => dim !== 'ciudad' || ciudad === 'todas')
+              {/* anio_jc venía de la pestaña «Por año» (quitada 2026-10-26: sus conteos ya están en Resumen). */}
+              {(['anio_jc', 'horario', 'genero', 'ciudad'] as const)
+                .filter((dim) => (dim !== 'ciudad' || ciudad === 'todas') && (dim !== 'anio_jc' || !anioPuntual))
                 .map((dim) => (
                   <Seccion
                     key={dim}
-                    titulo={`Asistencia promedio por ${dim === 'horario' ? 'horario' : dim === 'genero' ? 'género' : 'ciudad'}${sufijo}`}
-                    nota={NOTA_PRIVACIDAD}
+                    titulo={`Asistencia promedio por ${{ anio_jc: 'promoción de JC', horario: 'horario', genero: 'género', ciudad: 'ciudad' }[dim]}${sufijo}`}
+                    nota={dim === 'anio_jc' ? '% de las clases de su horario a las que asistió cada estudiante, promediado por año de egreso.' : undefined}
                   >
                     <GraficoBarras datos={asistenciaGrupo(dim)} dataKey="pct" nombre="% asistencia" color={dim === 'genero' ? C.naranja : C.verde} dominioMax={100} sufijoEtiqueta="%" decimalesEtiqueta={1} />
                   </Seccion>

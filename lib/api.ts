@@ -458,6 +458,31 @@ export interface PubDemografia {
   total: number | null;
 }
 
+// v_pub_demografia_jc_personas (migración 097, 2026-10-26): demografía JC 1 a 1 con PERSONAS.
+// Una fila por cohorte ('2019'..'2026' o 'todos' = personas únicas) × estado ('activo' | 'retirado'
+// | 'todos', ya calculado: NO sumar en el navegador) × ámbito ('nacional' con grupo_ciudad=null, o
+// 'ciudad') × dimensión × categoría. Cada dimensión incluye 'Sin dato', así que Σ total por
+// dimensión = `poblacion` (personas reales de ese corte). Sin celdas null (las categorías <5 de
+// estrato/edad/etc. vienen agrupadas como 'Otros (grupos < 5)').
+export interface PubDemografiaJcPersonas {
+  programa: 'jc';
+  cohorte: string;
+  estado: 'activo' | 'retirado' | 'todos';
+  ambito: 'nacional' | 'ciudad';
+  grupo_ciudad: string | null;
+  dimension:
+    | 'genero'
+    | 'edad_rango'
+    | 'estrato'
+    | 'estado_civil'
+    | 'nivel_estudio'
+    | 'tipo_vivienda'
+    | 'grupo_ciudad';
+  categoria: string;
+  total: number;
+  poblacion: number;
+}
+
 // v_pub_segmento_poblacional_jc (migraciones 067/068): respuesta multivalor de Fase 1 para
 // JC 2025/2026. `total=null` = celda suprimida por k-anonimato. `ninguna`, `no_respondio` y
 // `sin_clasificar` son estados de respuesta y no categorías vulnerables inventadas.
@@ -624,6 +649,9 @@ export interface Datos {
   frescura: Frescura[];
   // Fase 1/2 del rediseño (037) — ver sección de interfaces arriba.
   pubDemografia: PubDemografia[];
+  // Demografía JC por personas (migración 097). leerSeguroPaginado: >1000 filas y la vista puede
+  // no estar aplicada todavía → [] y la pestaña cae al cálculo viejo (v_pub_demografia).
+  demografiaJcPersonas: PubDemografiaJcPersonas[];
   segmentoPoblacional: PubSegmentoPoblacional[];
   pubEmprendimiento: PubEmprendimiento[];
   pubAsistencia: PubAsistencia[];
@@ -670,7 +698,7 @@ export interface Datos {
 }
 
 export async function cargarTodo(): Promise<Datos> {
-  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, segmentoPoblacional, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc, mrDemografiaUniverso, mrFormacionUniverso, mrCursoNormalizado] =
+  const [cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, segmentoPoblacional, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc, mrDemografiaUniverso, mrFormacionUniverso, mrCursoNormalizado, demografiaJcPersonas] =
     await Promise.all([
       leer<CohorteStats>('cohorte_stats'),
       leer<CursoCompletion>('v_curso_completion?order=matriculados.desc'),
@@ -696,7 +724,8 @@ export async function cargarTodo(): Promise<Datos> {
       leer<HistorialEmoflow>('historial_emoflow?order=fecha.asc'),
       leer<GeografiaMunicipio>('v_pub_geografia?order=personas.desc'),
       leer<Frescura>('v_frescura'),
-      leer<PubDemografia>('v_pub_demografia'),
+      // >1000 filas (1.168 el 2026-10-26): con leer() PostgREST cortaba en 1000 y se perdían filas MR.
+      leerPaginado<PubDemografia>('v_pub_demografia'),
       leerSeguro<PubSegmentoPoblacional>('v_pub_segmento_poblacional_jc'),
       leer<PubEmprendimiento>('v_pub_emprendimiento'),
       leer<PubAsistencia>('v_pub_asistencia'),
@@ -726,14 +755,15 @@ export async function cargarTodo(): Promise<Datos> {
       leerSeguro<PubMrDemografiaUniverso>('v_pub_mr_demografia_universo'),
       leerSeguro<PubMrFormacionUniverso>('v_pub_mr_formacion_universo'),
       leerSeguro<CursoNormalizadoMr>('v_mr_curso_normalizado?order=matriculados.desc'),
+      leerSeguroPaginado<PubDemografiaJcPersonas>('v_pub_demografia_jc_personas'),
     ]);
-  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, segmentoPoblacional, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc, mrDemografiaUniverso, mrFormacionUniverso, mrCursoNormalizado };
+  return { cohorte, cursos, cursosPorCiudad, demografia, statsProgramaPorCiudad, emprendimiento, emprendimientoPorCiudad, empVsCursos, edades, programas, historial, historialPorCiudad, mrDemografia, ingresos, aprobacion, estudiantes, estudiantesDist, emoflowResumen, emoflowPorCiudad, emoflowBandas, emoflowBandasCiudad, historialEmoflow, geografiaMunicipio, frescura, pubDemografia, segmentoPoblacional, pubEmprendimiento, pubAsistencia, emoflowActividadSemanal, emoflowDiario, retiroProbableJc, aprobacionAjustada, emoflowResumenCanonico, emoflowPorCiudadCanonico, emoflowBandasCanonico, emoflowBandasCiudadCanonico, emoflowResumenRetirado, emoflowPorCiudadRetirado, emoflowBandasRetirado, emoflowBandasCiudadRetirado, pubSeguimiento, pubCohorte, retencionCiudad, impactoFinancieroMr, mrUniverso, aprobacionCiudadJc, mrDemografiaUniverso, mrFormacionUniverso, mrCursoNormalizado, demografiaJcPersonas };
 }
 
 export const NOMBRE_PROGRAMA: Record<string, string> = {
   jc: 'Jóvenes creaTIvos',
   mr: 'Mujeres ROFÉ',
-  jcon: 'JC-ON',
+  jcon: 'Jóvenes creaTIvos ON',
 };
 
 export const ETIQUETA_SITUACION: Record<string, string> = {

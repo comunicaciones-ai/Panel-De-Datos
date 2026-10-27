@@ -710,6 +710,25 @@ export default function Pagina() {
   const dimensionAplicaPrograma = (dim: string) =>
     !!datos && datos.pubDemografia.some((d) => d.programa === programa && d.dimension === dim);
 
+  // Demografía JC 1 a 1 con personas (v_pub_demografia_jc_personas, migración 097, 2026-10-26).
+  // Bug que corrige: con JC · Todos · Activos, las barras sumaban v_pub_demografia (persona-
+  // cohortes, estado mal clasificado en cohortes cerradas, celdas <5 perdidas) y la "Población
+  // total" sumaba el canon v_pub_cohorte (2.388) → 1.218 + 1.464 no cuadraba con 2.388. Ahora
+  // barras, "sin dato" y población salen de la MISMA vista y de las mismas personas:
+  // Σ categorías + 'Sin dato' = poblacion, siempre. Si la vista aún no existe en Supabase
+  // (lista vacía), se cae al cálculo viejo para no romper el panel.
+  const usarDemografiaPersonasJc = programa === 'jc' && !!datos && datos.demografiaJcPersonas.length > 0;
+  const demografiaJcFiltrada = useMemo(() => {
+    if (!datos || programa !== 'jc') return [];
+    const est = estado === 'activos' ? 'activo' : estado === 'retirados' ? 'retirado' : 'todos';
+    return datos.demografiaJcPersonas.filter(
+      (d) =>
+        d.cohorte === (esTodos ? 'todos' : cohorte) &&
+        d.estado === est &&
+        (ciudadElegida ? d.ambito === 'ciudad' && d.grupo_ciudad === ciudadElegida : d.ambito === 'nacional'),
+    );
+  }, [datos, programa, cohorte, estado, ciudadElegida, esTodos]);
+
   const pubEmprendimientoFiltrada = useMemo(() => {
     if (!datos) return [];
     return datos.pubEmprendimiento.filter(
@@ -1528,6 +1547,7 @@ export default function Pagina() {
   // hardcodeado, para no repetir el hallazgo de 2026-08-06 (JC sí tiene estas 4 dimensiones
   // desde ese día, ver docs/procesos/demografia-historica-jc.md).
   function TarjetaDemografia({ dimension }: { dimension: (typeof DIMENSIONES_DEMOGRAFIA)[number] }) {
+    if (usarDemografiaPersonasJc) return <TarjetaDemografiaPersonasJc dimension={dimension} />;
     if (!dimensionAplicaPrograma(dimension)) {
       return (
         <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
@@ -1587,6 +1607,72 @@ export default function Pagina() {
     return (
       <Seccion titulo={ETIQUETA_DIMENSION[dimension]} nota={dimension === 'edad_rango' ? 'En rangos — nunca edades individuales.' : undefined}>
         <PuntoSinDato cantidad={sinDato} total={demografiaTotalEsperado} />
+        <GraficoBarras datos={filas} dataKey="total" nombre="Personas" color={C.azul2} />
+      </Seccion>
+    );
+  }
+
+  // JC por personas (migración 097): todo sale de demografiaJcFiltrada — mismas personas en
+  // barras, punto "sin dato" y "Población total". 'Sin dato' no se dibuja como barra (va en el
+  // punto gris), pero cuenta en la población: Σ barras + sin dato = población, exacto.
+  function TarjetaDemografiaPersonasJc({ dimension }: { dimension: (typeof DIMENSIONES_DEMOGRAFIA)[number] }) {
+    const filasDim = demografiaJcFiltrada.filter((d) => d.dimension === dimension);
+    if (filasDim.length === 0) {
+      return (
+        <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
+          <NoAplica motivo="sin datos para este filtro (cohorte/estado/ciudad elegidos)." suave />
+        </Seccion>
+      );
+    }
+    const poblacion = filasDim[0].poblacion;
+    const sinDato = filasDim.filter((d) => d.categoria === 'Sin dato').reduce((a, d) => a + d.total, 0);
+    const conDato = filasDim.filter((d) => d.categoria !== 'Sin dato' && d.total > 0);
+    const punto = (
+      <PuntoSinDato
+        cantidad={sinDato}
+        total={poblacion}
+        texto={`${sinDato.toLocaleString('es-CO')} sin dato (de ${poblacion.toLocaleString('es-CO')} personas)`}
+      />
+    );
+    if (conDato.length === 0) {
+      return (
+        <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
+          {punto}
+          <NoAplica motivo="nadie en este filtro tiene este dato registrado." suave />
+        </Seccion>
+      );
+    }
+    if (dimension === 'genero' || dimension === 'estado_civil' || dimension === 'tipo_vivienda') {
+      const filas = conDato.map((d, i) => ({
+        nombre: ETIQUETA_MR[d.categoria] ?? d.categoria,
+        total: d.total,
+        color:
+          dimension === 'genero'
+            ? (COLOR_GENERO[d.categoria] ?? C.amarillo)
+            : [C.naranja, C.azul2, C.verde, C.amarillo, C.rojo][i % 5],
+      }));
+      return (
+        <Seccion titulo={ETIQUETA_DIMENSION[dimension]}>
+          {punto}
+          <GraficoEmprendimiento datos={filas} />
+        </Seccion>
+      );
+    }
+    const orden = dimension === 'edad_rango' ? ORDEN_EDAD_JC : ORDEN_MR[dimension];
+    const filas = conDato.map((d) => ({
+      etiqueta:
+        dimension === 'estrato' && /^\d$/.test(d.categoria)
+          ? `Estrato ${d.categoria}`
+          : (ETIQUETA_MR[d.categoria] ?? d.categoria),
+      total: d.total,
+      orden: d.categoria,
+    }));
+    // Orden fijo cuando existe; lo que no está en el orden (ej. 'Otros (grupos < 5)') va al final.
+    const pos = (c: string) => (orden && orden.indexOf(c) >= 0 ? orden.indexOf(c) : 999);
+    filas.sort((a, b) => pos(a.orden) - pos(b.orden) || a.orden.localeCompare(b.orden));
+    return (
+      <Seccion titulo={ETIQUETA_DIMENSION[dimension]} nota={dimension === 'edad_rango' ? 'En rangos — nunca edades individuales.' : undefined}>
+        {punto}
         <GraficoBarras datos={filas} dataKey="total" nombre="Personas" color={C.azul2} />
       </Seccion>
     );
@@ -3114,7 +3200,7 @@ export default function Pagina() {
         )
       )}
 
-      {tab === 'Demografía' && estado === 'retirados' ? (
+      {tab === 'Demografía' && estado === 'retirados' && !usarDemografiaPersonasJc ? (
         // Demografía por RETIRADOS: las dimensiones sociodemográficas siguen marcadas como
         // construcción, pero el segmento poblacional viene de la convocatoria y sí tiene fuente
         // para este estado; no ocultarlo detrás del aviso general.
@@ -3126,7 +3212,11 @@ export default function Pagina() {
         <>
           <p className="text-xs text-slate-400 mb-1">
             {NOMBRE_PROGRAMA[programa]} · {etiquetaCohorte} · {ETIQUETA_ESTADO[estado]}
-            {programa === 'mr' ? ' — fuente: BD-Mujeres ROFÉ.' : ' — fuente: BD de monitorias.'}
+            {programa === 'mr'
+              ? ' — fuente: BD-Mujeres ROFÉ.'
+              : usarDemografiaPersonasJc
+                ? ' — fuente: BD de monitorias, contando cada persona una sola vez (cada gráfico suma la población total).'
+                : ' — fuente: BD de monitorias.'}
           </p>
           <div className="grid md:grid-cols-2 gap-6">
             {DIMENSIONES_DEMOGRAFIA.map((dim) => (
