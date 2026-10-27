@@ -1336,7 +1336,10 @@ export default function Pagina() {
           : retencionCiudadSeleccionada.ingresados;
       participantes = personasCiudad;
 
-      if (programa === 'jc' && aprobacionCiudadConDato.length > 0) {
+      // Solo la vigente: en cerradas v_pub_aprobacion_ciudad_jc usa el universo en_seguimiento
+      // (0 retirados), y sus matrículas no cuadran con las personas de la 097 (Cali 2025: 87
+      // personas vs 1.277 matrículas en Activos y en Todos).
+      if (programa === 'jc' && esActual && aprobacionCiudadConDato.length > 0) {
         const porEstado = (a: typeof aprobacionCiudadConDato[number]) =>
           estado === 'activos'
             ? { total: a.activos, aprobadas: a.aprobados }
@@ -2711,7 +2714,20 @@ export default function Pagina() {
           })
           .sort((a, b) => a.cohorte.localeCompare(b.cohorte));
 
-        const filas = datos.retencionCiudad
+        // JC: misma fuente que los botones (097 vía retencionPorCiudad) — v_pub_retencion_ciudad
+        // cuenta a una persona como activa y retirada (833 vs 832, cuadre 2026-10-27).
+        const filas = usarCiudadesJc
+          ? Array.from(retencionPorCiudad.mapa.entries())
+              .map(([grupo, r]) => ({
+                etiqueta: ETIQUETA_GRUPO[grupo] ?? grupo,
+                retencion: r.pct,
+                activos: r.activos,
+                retirados: r.retirados,
+                ingresados: r.ingresados,
+                desercion: Math.round(10 * (100 - r.pct)) / 10,
+              }))
+              .sort((a, b) => b.retencion - a.retencion)
+          : datos.retencionCiudad
           .filter((r) => r.programa === programa && r.cohorte === cohorte && r.retencion_pct != null && r.ingresados)
           .map((r) => ({
             etiqueta: ETIQUETA_GRUPO[r.grupo_ciudad] ?? r.grupo_ciudad,
@@ -3409,6 +3425,11 @@ export default function Pagina() {
           : null;
         return (
           <>
+            {/* v_pub_asistencia solo publica activos: con Todos/Retirados se avisa en vez de
+                mostrar los activos bajo otra etiqueta (cuadre 2026-10-27). */}
+            {estado !== 'activos' && (
+              <NotaFiltros inaplicables={['Estado (la asistencia solo se mide en estudiantes activos)']} />
+            )}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               <Kpi
                 titulo="Asistencia promedio"
