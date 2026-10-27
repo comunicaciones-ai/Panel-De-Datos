@@ -540,10 +540,39 @@ export default function Pagina() {
       datos
         ? datos.geografiaMunicipio.filter((g) => g.programa === programa && (esTodos || g.cohorte === cohorte))
         : [],
-    [datos, programa, cohorte],
+    [datos, programa, cohorte, esTodos],
   );
 
+  // JC: personas por ciudad × Estado desde v_pub_demografia_jc_personas (097), la MISMA fuente
+  // que Demografía (cuadre 2026-10-27). Antes los botones sumaban v_pub_geografia, que en
+  // cohortes cerradas cuenta ingresados y en la vigente solo activos, sin columna de estado:
+  // con JC · Todos los botones sumaban 3.024 en los 3 estados contra 2.388/3.165/777 del KPI.
+  // Incluye 'Sin dato' (personas sin ciudad) para que Σ botones = población.
+  const ciudadesJc = useMemo(() => {
+    const mapa = new Map<string, { activos: number; retirados: number; ingresados: number }>();
+    if (!datos || programa !== 'jc') return mapa;
+    const coh = esTodos ? 'todos' : cohorte;
+    datos.demografiaJcPersonas
+      .filter((d) => d.ambito === 'nacional' && d.dimension === 'grupo_ciudad' && d.cohorte === coh)
+      .forEach((d) => {
+        const f = mapa.get(d.categoria) ?? { activos: 0, retirados: 0, ingresados: 0 };
+        if (d.estado === 'activo') f.activos = d.total ?? 0;
+        else if (d.estado === 'retirado') f.retirados = d.total ?? 0;
+        else f.ingresados = d.total ?? 0;
+        mapa.set(d.categoria, f);
+      });
+    return mapa;
+  }, [datos, programa, cohorte, esTodos]);
+  const usarCiudadesJc = ciudadesJc.size > 0;
+
   const gruposGeografia = useMemo(() => {
+    if (usarCiudadesJc) {
+      const k = estado === 'activos' ? 'activos' : estado === 'retirados' ? 'retirados' : 'ingresados';
+      return Array.from(ciudadesJc.entries())
+        .filter(([grupo, f]) => grupo !== 'Sin dato' && f[k] > 0)
+        .sort((a, b) => b[1][k] - a[1][k])
+        .map(([grupo, f]) => ({ grupo, total: f[k] }));
+    }
     const totales = new Map<string, number>();
     geografiaProg.forEach((g) =>
       totales.set(g.grupo_ciudad, (totales.get(g.grupo_ciudad) ?? 0) + g.personas),
@@ -551,13 +580,34 @@ export default function Pagina() {
     return Array.from(totales.entries())
       .sort((a, b) => b[1] - a[1])
       .map(([grupo, total]) => ({ grupo, total }));
-  }, [geografiaProg]);
+  }, [geografiaProg, usarCiudadesJc, ciudadesJc, estado]);
+  const sinCiudadJc = usarCiudadesJc
+    ? (() => {
+        const f = ciudadesJc.get('Sin dato');
+        if (!f) return 0;
+        return estado === 'activos' ? f.activos : estado === 'retirados' ? f.retirados : f.ingresados;
+      })()
+    : 0;
 
   // Retención por ciudad para pintarla en los botones del selector del Resumen (pedido de Samuel
   // 2026-08-13): cada ciudad visible muestra su % de retención, y "Todas" el global. Solo en la
   // cohorte vigente (v_pub_retencion_ciudad es canon-exacta solo ahí; en cerradas no hay ciudad).
   const retencionPorCiudad = useMemo(() => {
     const mapa = new Map<string, { pct: number; activos: number; retirados: number; ingresados: number }>();
+    if (usarCiudadesJc) {
+      // JC (2026-10-27): misma fuente que los botones (097), en todas las cohortes — activos y
+      // retirados excluyentes, sin el doble conteo de v_pub_retencion_ciudad (833 vs 832). El %
+      // de "Todas" usa el canon v_pub_cohorte (mismo número que el KPI Retención).
+      ciudadesJc.forEach((f, grupo) => {
+        if (grupo === 'Sin dato' || !f.ingresados) return;
+        mapa.set(grupo, { pct: Math.round((1000 * f.activos) / f.ingresados) / 10, ...f });
+      });
+      const canon = datos?.pubCohorte.find((c) => c.programa === programa && c.cohorte === cohorte);
+      return {
+        mapa,
+        total: esActual && canon?.ingresados ? Math.round((1000 * (canon.activos ?? 0)) / canon.ingresados) / 10 : null,
+      };
+    }
     if (!datos || !esActual) return { mapa, total: null as number | null };
     let sa = 0, si = 0;
     datos.retencionCiudad
@@ -573,7 +623,7 @@ export default function Pagina() {
         si += r.ingresados ?? 0;
       });
     return { mapa, total: si ? Math.round((1000 * sa) / si) / 10 : null };
-  }, [datos, programa, cohorte, esActual]);
+  }, [datos, programa, cohorte, esActual, usarCiudadesJc, ciudadesJc]);
 
   const municipiosGrupo = useMemo(
     () =>
@@ -698,11 +748,11 @@ export default function Pagina() {
     return datos.segmentoPoblacional.filter(
       (d) =>
         d.programa === 'jc' &&
-        d.cohorte === cohorte &&
+        (esTodos || d.cohorte === cohorte) &&
         (estado === 'todos' || d.estado === (estado === 'activos' ? 'activo' : 'retirado')) &&
         (!ciudadElegida || d.grupo_ciudad === ciudadElegida),
     );
-  }, [datos, programa, cohorte, estado, ciudadElegida]);
+  }, [datos, programa, cohorte, estado, ciudadElegida, esTodos]);
 
   // "No aplica" (estructural, por programa) vs. "sin datos" (el filtro vigente no tiene
   // filas) para cada dimensión — se evalúa sobre TODO el dataset del programa, ignorando el
@@ -1130,6 +1180,17 @@ export default function Pagina() {
   // vive en v_pub_cohorte (mismo dato que el banner de panel_control_gui.py). Fallback → las
   // tarjetas de cohortes cerradas muestran ingresados/culminantes/retirados/retención del canon
   // en vez de quedar en blanco. La viva (2026) sigue tomando cohorte_ingresos (idéntico al canon).
+  // JC (decisión de Samuel 2026-10-27): el activo de la cohorte vigente es el de Seguimiento, así
+  // que manda v_pub_cohorte (832/697/135, activos = en_seguimiento_jc) sobre cohorte_ingresos
+  // (Q10, 696/136). Antes el KPI mezclaba 697 activos con 136 retirados → 833 ≠ 832.
+  const buscarIngresos = (coh: string) =>
+    !datos
+      ? undefined
+      : programa === 'jc'
+        ? datos.pubCohorte.find((i) => i.cohorte === coh && i.programa === programa) ??
+          datos.ingresos.find((i) => i.cohorte === coh && i.programa === programa)
+        : datos.ingresos.find((i) => i.cohorte === coh && i.programa === programa) ??
+          datos.pubCohorte.find((i) => i.cohorte === coh && i.programa === programa);
   const ingresosProg = useMemo(() => {
     if (!datos) return undefined;
     if (esTodos) {
@@ -1137,10 +1198,7 @@ export default function Pagina() {
       // viva, pubCohorte = canon de cohortes cerradas) — se resuelve cohorte por cohorte antes
       // de sumar, para no mezclar una fuente incompleta si algún año tuviera ambas.
       const filas = cohortes
-        .map((coh) =>
-          datos.ingresos.find((i) => i.cohorte === coh && i.programa === programa) ??
-          datos.pubCohorte.find((i) => i.cohorte === coh && i.programa === programa),
-        )
+        .map((coh) => buscarIngresos(coh))
         .filter((f): f is NonNullable<typeof f> => !!f);
       // Cobertura PARCIAL (ej. hoy: solo 2026 tiene fila canon en cohorte_ingresos/v_pub_cohorte
       // — 2023-2025 nunca se curaron ahí, distinto del histórico Q10 crudo que sí se backfilleó
@@ -1151,10 +1209,7 @@ export default function Pagina() {
       if (filas.length < cohortes.length) return undefined;
       return sumarIngresos(filas);
     }
-    return (
-      datos.ingresos.find((i) => i.cohorte === cohorte && i.programa === programa) ??
-      datos.pubCohorte.find((i) => i.cohorte === cohorte && i.programa === programa)
-    );
+    return buscarIngresos(cohorte);
   }, [datos, cohorte, programa, cohortes, esTodos]);
 
   // Denominador correcto para el punto gris "sin dato" de TarjetaDemografia (pedido 2026-08-28,
@@ -1265,7 +1320,11 @@ export default function Pagina() {
       ? retencionPorCiudad.mapa.get(ciudadElegida ?? '')
       : undefined;
 
-    if (hayFiltroCiudad && esActual && retencionCiudadSeleccionada) {
+    // JC (2026-10-27): con ciudad elegida, las personas por Estado salen de la 097 en TODAS las
+    // cohortes (y en "Todos"), no solo en la vigente. Antes, en cohortes cerradas con Estado
+    // Todos/Retirados quedaba el total NACIONAL (2.744, 737…) bajo "Participantes en <ciudad>".
+    const ciudadConPersonas = hayFiltroCiudad && (esActual || usarCiudadesJc) && !!retencionCiudadSeleccionada;
+    if (ciudadConPersonas && retencionCiudadSeleccionada) {
       // v_pub_geografia solo publica el universo JC/MR activo. Antes se reutilizaba para
       // Estado=Todos/Retirados y el panel mostraba, por ejemplo, 122 activas en Bogotá al
       // seleccionar Retirados. Para la cohorte vigente, v_pub_retencion_ciudad es el canon
@@ -1296,8 +1355,9 @@ export default function Pagina() {
               return matriculas ? `${(suma / matriculas).toFixed(1)}%` : '—';
             })()
           : '—';
-      } else if (estado !== 'activos') {
-        // MR no tiene todavía una vista de completación por ciudad y Estado. No mostrar el
+      } else if (estado !== 'activos' || !esActual) {
+        // MR no tiene todavía una vista de completación por ciudad y Estado (y JC tampoco en
+        // cohortes cerradas: no reciclar las matrículas nacionales bajo una ciudad). No mostrar el
         // agregado activo como si fuera Retirados/Todos: el bloque visible de abajo explica
         // la limitación.
         matriculas = 0;
@@ -1320,17 +1380,19 @@ export default function Pagina() {
 
     const esCanonico = mostrarCanonico && !hayFiltroCiudad;
     if (esCanonico) {
-      matriculas = aprobacionProg.reduce((s, a) => s + a.cursaron, 0);
-      completadas = aprobacionProg.reduce(
-        (s, a) => s + (a.aprobados_total ?? a.aprobados + a.aprobados_retirados), 0);
+      // Matrículas/completadas siguen al filtro Estado, igual que la pestaña Cursos (antes el
+      // Resumen mostraba 7.854 con cualquier Estado y Cursos 6.960 activos / 894 retirados).
+      matriculas = aprobacionProg.reduce((s, a) => s + totalPorEstado(a), 0);
+      completadas = aprobacionProg.reduce((s, a) => s + aprobadosPorEstado(a), 0);
+      const totalCohorte = aprobacionProg.reduce((s, a) => s + a.cursaron, 0);
       const sumaPond = aprobacionProg.reduce((s, a) => s + Number(a.promedio ?? 0) * a.cursaron, 0);
-      promedio = matriculas ? `${(sumaPond / matriculas).toFixed(1)}%` : promedio;
+      promedio = totalCohorte ? `${(sumaPond / totalCohorte).toFixed(1)}%` : promedio;
       estadoCohorte = {
-        aprobadas: completadas,
+        aprobadas: aprobacionProg.reduce((s, a) => s + (a.aprobados_total ?? a.aprobados + a.aprobados_retirados), 0),
         enProgreso: aprobacionProg.reduce((s, a) => s + (a.banda_26_80 ?? 0), 0),
         enRiesgo: aprobacionProg.reduce((s, a) => s + (a.banda_0_25 ?? 0), 0),
         retiradas: aprobacionProg.reduce((s, a) => s + a.retirados, 0),
-        total: matriculas,
+        total: totalCohorte,
       };
     }
 
@@ -1385,7 +1447,7 @@ export default function Pagina() {
     // Filtro "Estado": cambia qué número es EL número principal (§2.1.3).
     const cifraEstado = !ing
       ? null
-      : hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+      : ciudadConPersonas && retencionCiudadSeleccionada
         ? estado === 'activos'
           ? retencionCiudadSeleccionada.activos
           : estado === 'retirados'
@@ -1414,13 +1476,13 @@ export default function Pagina() {
       cifraEstado,
       usarActualesSeguimiento,
       actualesGeo,
-      ingresados: hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+      ingresados: ciudadConPersonas && retencionCiudadSeleccionada
         ? retencionCiudadSeleccionada.ingresados
         : hayFiltroCiudad ? null : ing?.ingresados ?? null,
-      activos: hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+      activos: ciudadConPersonas && retencionCiudadSeleccionada
         ? retencionCiudadSeleccionada.activos
         : ing?.activos ?? null,
-      retirados: hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+      retirados: ciudadConPersonas && retencionCiudadSeleccionada
         ? retencionCiudadSeleccionada.retirados
         : ing?.retirados ?? null,
       // Retención/Deserción de la cohorte VIGENTE de JC (pedido de Samuel 2026-09-07): usar el
@@ -1429,11 +1491,11 @@ export default function Pagina() {
       // frente a los retiros del día). Antes esta casilla mostraba 88.9% (740/832, canon) mientras
       // "Actuales" ya mostraba 726 — dos números de activos distintos en la misma pantalla. Fuera
       // de ese caso (cohortes cerradas, MR, con filtro de ciudad) se conserva el canon de siempre.
-      activosRetencion: hayFiltroCiudad && esActual && retencionCiudadSeleccionada
+      activosRetencion: ciudadConPersonas && retencionCiudadSeleccionada
         ? retencionCiudadSeleccionada.activos
         : usarActualesSeguimiento ? actualesGeo : (ing?.activos ?? null),
     };
-  }, [datos, programa, cohorte, estado, hayFiltroCiudad, ciudadElegida, geografiaResumen, retencionPorCiudad, esActual, esTodos, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg]);
+  }, [datos, programa, cohorte, estado, hayFiltroCiudad, ciudadElegida, geografiaResumen, retencionPorCiudad, esActual, esTodos, aprobacionProg, aprobacionCiudadConDato, mostrarCanonico, ingresosProg, usarCiudadesJc]);
 
   // Retención y Asistencia se quitaron del tab bar de MR (pedido 2026-08-27, tras la
   // auditoría de 2 agentes): miden procesos que MR no tiene estructurados de la misma forma
@@ -2195,12 +2257,17 @@ export default function Pagina() {
                   }`}
                 >
                   {ETIQUETA_GRUPO[grupo] ?? grupo} · {totalEstado}
-                  {ret != null && (
+                  {ret != null && (esActual || !usarCiudadesJc) && (
                     <span className="font-bold" style={{ color: colorRetencion(ret.pct) }}> · {ret.pct}%</span>
                   )}
                 </button>
                 );
               })}
+              {/* Personas sin ciudad registrada: no es filtrable, pero sin este chip Σ botones
+                  quedaba por debajo del total (cuadre 2026-10-27). */}
+              {sinCiudadJc > 0 && (
+                <span className="px-3 py-2 text-sm text-slate-400">Sin ciudad · {sinCiudadJc}</span>
+              )}
             </div>
             {retencionPorCiudad.total != null && (
               <p className="text-[11px] text-slate-400 px-1">
@@ -2269,10 +2336,21 @@ export default function Pagina() {
               <>
                 <Kpi titulo={`Ingresados ${NOMBRE_PROGRAMA[programa]}`} valor={String(kpis.ingresados)} detalle={`Cohorte ${etiquetaCohorte} — universo oficial (canon, sin staff ni pruebas)`} />
                 <Kpi titulo="Retención" valor={kpis.ingresados ? `${((100 * (kpis.activos ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.verde} />
-                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${((100 * (kpis.retirados ?? 0)) / kpis.ingresados).toFixed(1)}%` : '—'} acento={C.rojo} />
-                <Kpi titulo="Culminantes" valor={kpis.activos != null ? String(kpis.activos) : '—'} detalle="terminaron el programa (canon)" />
+                <Kpi titulo="Deserción" valor={kpis.ingresados ? `${(100 - Number(((100 * (kpis.activos ?? 0)) / kpis.ingresados).toFixed(1))).toFixed(1)}%` : '—'} acento={C.rojo} />
+                {/* JC · Todos suma cohortes cerradas (culminantes) y la vigente (activos en
+                    Seguimiento, aún cursando): rotularlo así en vez de llamarlos a todos
+                    "culminantes". "Cursos" se oculta: Σ filas curso×año no es un número de cursos. */}
+                <Kpi
+                  titulo={esJcTodos ? 'Culminantes + activos' : 'Culminantes'}
+                  valor={kpis.activos != null ? String(kpis.activos) : '—'}
+                  detalle={esJcTodos
+                    ? `culminantes de años cerrados + activos ${cohorteActual} (Seguimiento)`
+                    : 'terminaron el programa (canon)'}
+                />
                 <Kpi titulo="Retirados" valor={kpis.retirados != null ? String(kpis.retirados) : '—'} detalle="se retiraron (canon)" />
-                <Kpi titulo="Cursos" valor={String(cursosProg.length)} detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${etiquetaCohorte}`} />
+                {!esTodos && (
+                  <Kpi titulo="Cursos" valor={String(cursosProg.length)} detalle={`Ruta ${NOMBRE_PROGRAMA[programa]} ${etiquetaCohorte}`} />
+                )}
               </>
             ) : (
               <>
@@ -2304,7 +2382,9 @@ export default function Pagina() {
                 valor={String(kpis.participantes)}
                 detalle={
                   ciudadElegida
-                    ? `Activos en la cohorte ${etiquetaCohorte}. La cohorte canónica (ingresados = activos + retirados) no tiene desglose por ciudad.`
+                    ? usarCiudadesJc
+                      ? `${ETIQUETA_ESTADO[estado]} · cohorte ${etiquetaCohorte} · personas, misma fuente que Demografía y los botones de ciudad`
+                      : `Activos en la cohorte ${etiquetaCohorte}. La cohorte canónica (ingresados = activos + retirados) no tiene desglose por ciudad.`
                     : esActual
                       ? `Activos en la cohorte ${etiquetaCohorte}`
                       : `Cohorte ${etiquetaCohorte} (histórico Q10 — no incluye retirados)`
@@ -2327,7 +2407,7 @@ export default function Pagina() {
                 />
                 <Kpi
                   titulo="Deserción"
-                  valor={`${(100 - (100 * kpis.activosRetencion) / kpis.ingresados).toFixed(1)}%`}
+                  valor={`${(100 - Number(((100 * kpis.activosRetencion) / kpis.ingresados).toFixed(1))).toFixed(1)}%`}
                   detalle={kpis.usarActualesSeguimiento ? 'Incluye retiros aún sin confirmar en el canon' : undefined}
                   acento={C.rojo}
                 />
@@ -2338,7 +2418,7 @@ export default function Pagina() {
               return (
                 <>
                   <Kpi titulo={`Retención · ${ciu}`} valor={`${rc.pct.toFixed(1)}%`} acento={C.verde} />
-                  <Kpi titulo={`Deserción · ${ciu}`} valor={`${((100 * rc.retirados) / rc.ingresados).toFixed(1)}%`} acento={C.rojo} />
+                  <Kpi titulo={`Deserción · ${ciu}`} valor={`${(100 - rc.pct).toFixed(1)}%`} acento={C.rojo} />
                 </>
               );
             })() : null}
@@ -2509,7 +2589,7 @@ export default function Pagina() {
           {mostrarCanonico && !hayFiltroCiudad ? (
             <Seccion
               titulo={`Avance de la cohorte por curso — ${NOMBRE_PROGRAMA[programa]} · ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}`}
-              nota={`Cada barra suma la cohorte completa que cursó (${kpis.ingresados ?? '—'} ingresados en los cursos base): aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro.`}
+              nota="Cada barra = quienes cursaron ese curso (no todos los ingresados cursan todos los cursos): aprobó = avance > 80%; quien aprobó antes de retirarse conserva su logro."
             >
               <GraficoAprobacion datos={aprobacionProg.map(segmentosAprobacion)} />
             </Seccion>
@@ -3181,7 +3261,7 @@ export default function Pagina() {
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
                 <Kpi titulo="Ya emprende" valor={`${pct(enMarcha)}%`} detalle={`${enMarcha.toLocaleString('es-CO')} con emprendimiento en marcha`} />
                 <Kpi titulo="Potencial" valor={`${pct(potencial)}%`} detalle={`${potencial.toLocaleString('es-CO')} con idea o interesados`} />
-                <Kpi titulo="Diagnosticados" valor={totalDiag.toLocaleString('es-CO')} detalle={`Encuesta JC · ${etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}`} />
+                <Kpi titulo="Diagnosticados" valor={totalDiag.toLocaleString('es-CO')} detalle={`Encuesta JC · ${esTodos ? `solo ${Array.from(new Set(pubEmprendimientoFiltrada.map((d) => d.cohorte))).sort().join(' y ')} (la encuesta no existía antes)` : etiquetaCohorte} · ${ETIQUETA_ESTADO[estado]}`} />
               </div>
             );
           })()}
