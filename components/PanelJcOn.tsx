@@ -12,9 +12,10 @@ import { ETIQUETA_GRUPO } from '@/lib/api';
 import { cargarJcon, DatosJcon, ETIQUETA_HORARIO, JconDemografia } from '@/lib/jcon';
 import { C, GraficoBarras } from '@/components/graficos';
 import { Kpi, NoAplica, Seccion } from '@/components/ui';
+import { contarSesiones, JconAsistencia } from '@/components/JconAsistencia';
 
-type TabJcon = 'Resumen' | 'Asistencia';
-const TABS_JCON: TabJcon[] = ['Resumen', 'Asistencia'];
+type TabJcon = 'Resumen' | 'Asistencia' | 'Tiempo';
+const TABS_JCON: TabJcon[] = ['Resumen', 'Asistencia', 'Tiempo'];
 
 const VERDE_OSCURO = '#3f6b2c';
 const ORDEN_EDAD = ['< 18', '18-20', '21-22', '23-24', '25+'];
@@ -80,22 +81,6 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
   }, [datos, cohorte]);
   const inscritosEn = (c: string, a: string) =>
     datos?.resumen.find((r) => r.cohorte_jcon === cohorte && r.ciudad_f === c && r.anio_f === a)?.inscritos;
-
-  const clases = useMemo(
-    () =>
-      datos
-        ? enFiltro(datos.asistenciaClase).map((c) => ({
-            etiqueta: `${c.fecha.slice(8, 10)}/${c.fecha.slice(5, 7)}${c.horario ? (c.horario === 'manana' ? ' AM' : ' PM') : ''}`,
-            pct: c.inscritos && c.asistentes != null ? (100 * c.asistentes) / c.inscritos : null,
-          }))
-        : [],
-    [datos, cohorte, ciudad, anio], // eslint-disable-line react-hooks/exhaustive-deps
-  );
-  const asistenciaGrupo = (dimension: string) =>
-    (datos ? enFiltro(datos.asistenciaGrupo) : [])
-      .filter((g) => g.dimension === dimension)
-      .sort((a, b) => ordenar(dimension, a.categoria, b.categoria))
-      .map((g) => ({ etiqueta: etiquetaCategoria(dimension, g.categoria), pct: g.pct_asistencia }));
 
   const nombreFiltro = [
     anio !== 'todos' ? `JC ${etiquetaAnio(anio)}` : null,
@@ -224,7 +209,7 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
             <Kpi titulo="Grupo mañana" valor={String(resumen.manana ?? '—')} detalle="10:00 a 12:00" />
             <Kpi titulo="Grupo tarde" valor={String(resumen.tarde ?? '—')} detalle="2:00 a 4:00 p. m." />
             <Kpi titulo="Promociones JC" valor={String(resumen.anios_jc)} detalle="años de egreso distintos" />
-            <Kpi titulo="Clases realizadas" valor={String(resumen.clases)} detalle="sesiones Zoom registradas" />
+            <Kpi titulo="Clases realizadas" valor={String(contarSesiones(enFiltro(datos?.asistenciaClase ?? [])))} detalle="sesiones Zoom registradas" />
             <Kpi
               titulo="Asistencia promedio"
               valor={resumen.asistencia_promedio_pct != null ? `${resumen.asistencia_promedio_pct}%` : '—'}
@@ -244,29 +229,11 @@ export function PanelJcOn({ selectorPrograma }: { selectorPrograma: ReactNode })
         </>
       )}
 
-      {resumen?.inscritos != null && tab === 'Asistencia' && (
+      {datos && cohorte && resumen?.inscritos != null && (tab === 'Asistencia' || tab === 'Tiempo') && (
         sinClases ? (
-          <Seccion titulo="Asistencia a clases (Zoom)">{avisoSinClases}</Seccion>
+          <Seccion titulo={tab === 'Tiempo' ? 'Tiempo en sesión (Zoom)' : 'Asistencia a clases (Zoom)'}>{avisoSinClases}</Seccion>
         ) : (
-          <>
-            <Seccion titulo={`Asistencia por clase${sufijo}`} nota="Asistentes ÷ estudiantes del horario de la clase. Fuente: reportes de participantes de Zoom.">
-              <GraficoBarras datos={clases} dataKey="pct" nombre="% asistencia" color={C.verde} dominioMax={100} sufijoEtiqueta="%" decimalesEtiqueta={0} rotarEtiquetas={clases.length > 8} />
-            </Seccion>
-            <div className="grid lg:grid-cols-2 gap-x-5">
-              {/* anio_jc venía de la pestaña «Por año» (quitada 2026-10-26: sus conteos ya están en Resumen). */}
-              {(['anio_jc', 'horario', 'genero', 'ciudad'] as const)
-                .filter((dim) => (dim !== 'ciudad' || ciudad === 'todas') && (dim !== 'anio_jc' || !anioPuntual))
-                .map((dim) => (
-                  <Seccion
-                    key={dim}
-                    titulo={`Asistencia promedio por ${{ anio_jc: 'promoción de JC', horario: 'horario', genero: 'género', ciudad: 'ciudad' }[dim]}${sufijo}`}
-                    nota={dim === 'anio_jc' ? '% de las clases de su horario a las que asistió cada estudiante, promediado por año de egreso.' : undefined}
-                  >
-                    <GraficoBarras datos={asistenciaGrupo(dim)} dataKey="pct" nombre="% asistencia" color={dim === 'genero' ? C.naranja : C.verde} dominioMax={100} sufijoEtiqueta="%" decimalesEtiqueta={1} />
-                  </Seccion>
-                ))}
-            </div>
-          </>
+          <JconAsistencia vista={tab} datos={datos} cohorte={cohorte} ciudad={ciudad} anio={anio} sufijo={sufijo} />
         )
       )}
     </div>
